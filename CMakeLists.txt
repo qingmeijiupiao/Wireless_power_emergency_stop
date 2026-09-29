@@ -6,7 +6,6 @@ idf_build_set_property(MINIMAL_BUILD ON)
 set(EXTRA_COMPONENT_DIRS
     "components/app"
     "components/bsp"
-    "components/middleware"
 )
 
 # MAJOR.MINOR is maintained by developers. PATCH=99 identifies local builds;
