@@ -1,5 +1,10 @@
 # Wireless Power Switch Button
 
+> 历史快照：本文复制自按钮工程完成公共组件统一管理之前的说明，组件位置以本页下方更新后的
+> 路径为准。配对、协议、电量估算、日志和遥控链路现由
+> [`wireless-power-components`](https://github.com/qingmeijiupiao/wireless-power-components)
+> 公共仓库提供，实际引用见按钮/急停工程的 `main/idf_component.yml`。
+
 `Wireless_power_switch_button` 是一个基于 ESP-IDF 的低功耗无线遥控开关固件，
 默认与
 [`Wireless_power_meter_lite`](https://github.com/qingmeijiupiao/Wireless_power_meter_lite)
@@ -91,21 +96,20 @@ components/
   app/                        与本产品行为直接相关的应用组件
     app_runtime/              启动上下文、诊断和休眠收尾工具
     button_input/             按键事务、长短按策略和操作反馈
-    espnow_remote/            遥控端请求、响应等待和信道恢复
-    espnow_service/           Wireless Power 产品业务协议
     battery_voltage/          电池电压采样与校准
-    battery_level/            电量估算和显示约束
     power_manager/            唤醒来源和深度休眠管理
     status_led/               状态反馈
-    blackbox_service/         应用日志捕获和持久化
     shell_command/            维护命令注册
-  middleware/                 不直接决定产品交互的通用服务
-    espnow_link/              ESP-NOW 可靠链路、配对和 peer 存储
-    blackbox/                 结构化循环日志
-  bsp/                        ESP-IDF 外设、存储和控制台封装
-  common/                     与业务和硬件无关的通用算法
+  bsp/                        ESP-IDF 外设封装（当前仅 Temperature）
 scripts/                      构建后固件合并脚本
 ```
+
+遥控协议与应用、可靠链路、日志、电量估算、NVS/PWM/Flash 缓冲、插值、ADC、
+`wifi_manager`、`shell` 和 `diagnostic_log` 等共用组件位于
+[`wireless-power-components`](https://github.com/qingmeijiupiao/wireless-power-components)
+公共仓库，由 `main/idf_component.yml` 固定引用；下方架构图中的 `middleware`、`common`
+以及 `app` 下的 `espnow_remote`、`espnow_service_remote`、`battery_level`、
+`blackbox_service` 表示逻辑分层，源码不在本仓库。
 
 总体依赖方向是：
 
@@ -125,8 +129,9 @@ flowchart LR
 - `middleware` 负责可靠传输、配对和日志等可复用机制，不决定按键含义。
 - `bsp` 封装 ESP-IDF 外设和平台接口，不依赖产品业务。
 
-`espnow_service` 和 `espnow_link` 在遥控器与功率计仓库中分别维护。协议或链路发生
-不兼容修改时，需要同时检查两端实现并进行联调；日常修改不要求两个仓库逐提交同步。
+遥控端使用公共仓库的 `espnow_service_remote`，功率计保留接收端 `espnow_service`；
+`espnow_link` 统一来自公共仓库。协议或链路发生不兼容修改时，需要同时检查两端实现
+并进行联调。
 
 ## 关键组件如何协作
 
@@ -190,16 +195,16 @@ Flash 循环分区，用于排查偶发唤醒、通信超时和电量异常。�
 
 ### 接入不同控制目标
 
-如果仍使用当前 Wireless Power 协议，优先在
-`components/app/espnow_remote/` 封装新的调用方式。
+如果仍使用当前 Wireless Power 协议，优先在公共仓库的
+`components/product/espnow_remote/` 封装新的调用方式。
 
 如果消息类型和数据字段都要改变，则修改：
 
-- `components/app/espnow_service/`：业务消息和编解码；
+- 公共仓库的 `components/product/espnow_service_remote/`：业务消息和编解码；
 - 对端工程中的对应业务协议实现；
 - 必要时再扩展 Shell 测试命令。
 
-只有需要改变 ACK、重传、配对或 peer 管理机制时，才应修改
+只有需要改变 ACK、重传、配对或 peer 管理机制时，才应修改公共仓库的
 `components/middleware/espnow_link/`。
 
 ### 移植到其他板卡
@@ -216,22 +221,23 @@ Flash 循环分区，用于排查偶发唤醒、通信超时和电量异常。�
 
 ### 添加维护命令
 
-Shell 命令集中注册在 `components/app/shell_command/`。底层控制台初始化由
-`components/bsp/shell/` 负责。产品命令应放在应用层，不应写入通用 Shell 组件。
+Shell 命令集中注册在 `components/app/shell_command/`。底层控制台初始化由公共仓库的
+[`shell`](https://github.com/qingmeijiupiao/wireless-power-components/blob/79d506e686ec743ad961ab76c732af96313db54a/components/bsp/shell/README.md)
+负责。产品命令应放在应用层，不应写入通用 Shell 组件。
 
 ## 组件文档
 
 | 模块 | 文档 |
 |------|------|
 | 启动辅助工具 | [app_runtime](components/app/app_runtime/README.md) |
-| 遥控端应用 | [espnow_remote 公共接口](components/app/espnow_remote/include/espnow_remote.h) |
-| 产品业务协议 | [espnow_service](components/app/espnow_service/README.md) |
-| ESP-NOW 链路 | [espnow_link](components/middleware/espnow_link/README.md) |
+| 遥控端应用 | [espnow_remote 公共接口](https://github.com/qingmeijiupiao/wireless-power-components/blob/15525b7a2d3cc0694bbc0b65dcac8335cd73d454/components/product/espnow_remote/include/espnow_remote.h) |
+| 产品业务协议 | [espnow_service_remote](https://github.com/qingmeijiupiao/wireless-power-components/blob/15525b7a2d3cc0694bbc0b65dcac8335cd73d454/components/product/espnow_service_remote/README.md) |
+| ESP-NOW 链路 | [espnow_link](https://github.com/qingmeijiupiao/wireless-power-components/blob/15525b7a2d3cc0694bbc0b65dcac8335cd73d454/components/middleware/espnow_link/README.md) |
 | 电池采样 | [battery_voltage](components/app/battery_voltage/README.md) |
-| 电量估算 | [battery_level](components/app/battery_level/README.md) |
+| 电量估算 | [battery_level](https://github.com/qingmeijiupiao/wireless-power-components/blob/15525b7a2d3cc0694bbc0b65dcac8335cd73d454/components/middleware/battery_level/README.md) |
 | 电源管理 | [power_manager](components/app/power_manager/README.md) |
 | Shell 命令 | [shell_command](components/app/shell_command/README.md) |
-| 黑匣子服务 | [blackbox_service](components/app/blackbox_service/README.md) |
+| 黑匣子服务 | [blackbox_service](https://github.com/qingmeijiupiao/wireless-power-components/blob/15525b7a2d3cc0694bbc0b65dcac8335cd73d454/components/middleware/blackbox_service/README.md) |
 | 黑匣子存储 | [blackbox](https://github.com/qingmeijiupiao/wireless-power-components/blob/79d506e686ec743ad961ab76c732af96313db54a/components/middleware/blackbox/README.md) |
 
 ## 构建

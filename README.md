@@ -69,12 +69,29 @@ USB 串口 115200，发送单字符即可，无需回车：
 
 ## 结构和后续范围
 
+```text
+main/                         高层启动入口与未编译的按钮启动流程参考
+components/
+  app/                        急停产品应用组件
+    app_runtime/              启动上下文、诊断和休眠收尾工具
+    battery_voltage/          电池电压采样与校准
+    button_input/             按键事务与操作反馈
+    power_manager/            唤醒来源和深度休眠管理
+    screen_bringup/           模拟页面、USB 命令和传输诊断
+    shell_command/            维护命令注册
+    status_led/               状态反馈
+  bsp/                        板级专用驱动（sh1106、Temperature）
+```
+
 - `components/bsp/sh1106`：独立 SH1106 页式帧传输驱动。
 - `components/app/screen_bringup`：模拟页面、USB 命令和传输诊断。
 - `main/app_main.cpp`：当前仅进入屏幕验证。
 - `main/app_main_button_reference.cpp`：保留原按钮启动流程供移植参考，不参与构建。
-- 原有配对、协议、电池、低功耗组件及固定版本依赖随工程保留；原说明见 `docs/button-project-reference.md`。
-- SH1106 仅供本工程使用，按要求保留本地。电量、日志和遥控通信已与按钮工程共用公共仓库的实现；Lite 与 Pro V2 未修改。
+- 配对、协议、电量估算、日志和遥控链路等共用组件已统一迁移到
+  [wireless-power-components](https://github.com/qingmeijiupiao/wireless-power-components)
+  公共仓库，由 `main/idf_component.yml` 固定引用，原本地副本已移除；按钮工程迁移前的说明见
+  `docs/button-project-reference.md`。
+- SH1106 仅供本工程使用，按要求保留本地。Lite 与 Pro V2 未修改。
 
 后续：急停输入与关闭优先事务、具体保护原因协议、Lite/Pro V2 联调，以及硬件改版后的上电和休眠策略。
 
@@ -90,7 +107,7 @@ USB 串口 115200，发送单字符即可，无需回车：
 
 ## 共用组件验证
 
-`battery_level`、`blackbox_service`、`espnow_remote`、`espnow_service_remote`、`espnow_link` 来自固定 Git 版本的公共仓库，位置见 `main/idf_component.yml`。原本地副本已移除，`main/app_main_button_reference.cpp` 只是未编译的启动流程参考。
+`battery_level`、`blackbox_service`、`espnow_remote`、`espnow_service_remote`、`espnow_link` 等遥控相关组件，以及 `HXC_NVS`、`PWM`、`circular_flash_buffer`、`Interp`、`blackbox`、`ADC`、`wifi_manager`、`shell`、`diagnostic_log` 等通用组件来自固定 Git 版本的公共仓库，位置见 `main/idf_component.yml`。原本地副本已移除，`main/app_main_button_reference.cpp` 只是未编译的启动流程参考。
 
 ```powershell
 python scripts/idf_local.py -D ESTOP_VALIDATE_SHARED_REMOTE=ON build
@@ -98,4 +115,4 @@ python scripts/idf_local.py -D ESTOP_VALIDATE_SHARED_REMOTE=OFF build
 ```
 
 第一条检查遥控依赖编译，仍使用屏幕入口；第二条恢复默认屏幕配置。未进行急停开关或真实功率计联调。
-公共组件固定到 `15525b7a2d3cc0694bbc0b65dcac8335cd73d454`，通过 Component Manager 自动下载，不依赖本地相邻目录。
+遥控相关组件固定到 `15525b7a2d3cc0694bbc0b65dcac8335cd73d454`，其余通用组件固定到 `79d506e686ec743ad961ab76c732af96313db54a`，通过 Component Manager 自动下载，不依赖本地相邻目录。
