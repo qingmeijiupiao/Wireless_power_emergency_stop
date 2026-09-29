@@ -1,0 +1,14 @@
+menu "Emergency stop bring-up"
+    config ESTOP_OLED_SDA
+        int "OLED SDA GPIO (core board TX)"
+        range 0 21
+        default 21
+    config ESTOP_OLED_SCL
+        int "OLED SCL GPIO (core board RX)"
+        range 0 21
+        default 20
+    config ESTOP_OLED_COLUMN_OFFSET
+        int "SH1106 visible column offset"
+        range 0 4
+        default 2
+endmenu

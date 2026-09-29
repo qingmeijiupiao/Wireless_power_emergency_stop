@@ -1,0 +1,45 @@
+name: Wireless Power Emergency Stop CI
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: ESP-IDF Build
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        shared_remote: ["OFF", "ON"]
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+
+      - name: Build firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32c3
+          path: ./
+          command: idf.py -D ESTOP_VALIDATE_SHARED_REMOTE=${{ matrix.shared_remote }} build
+
+      - name: Validate firmware layout
+        run: python scripts/validate_firmware.py
+
+      - name: Upload bring-up firmware
+        uses: actions/upload-artifact@v4
+        with:
+          name: emergency-stop-${{ matrix.shared_remote }}-${{ github.sha }}
+          if-no-files-found: error
+          path: |
+            build/Wireless_power_emergency_stop.bin
+            Wireless_power_emergency_stop_merged.bin

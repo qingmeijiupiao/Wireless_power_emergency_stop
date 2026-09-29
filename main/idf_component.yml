@@ -1,0 +1,74 @@
+## IDF Component Manager Manifest File
+dependencies:
+  ## Required IDF version
+  idf:
+    version: '>=6.0.0'
+  # # Put list of dependencies here
+  # # For components maintained by Espressif:
+  # component: "~1.0.0"
+  # # For 3rd party components:
+  # username/component: ">=1.0.0,<2.0.0"
+  # username2/component2:
+  #   version: "~1.0.0"
+  #   # For transient dependencies `public` flag can be set.
+  #   # `public` flag doesn't have an effect dependencies of the `main` component.
+  #   # All dependencies of `main` are public by default.
+  #   public: true
+  HXC_NVS:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/HXC_NVS
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  PWM:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/PWM
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  circular_flash_buffer:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/circular_flash_buffer
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  Interp:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/common/Interp
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  blackbox:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/middleware/blackbox
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  ADC:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/ADC
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  wifi_manager:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/wifi_manager
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+  shell:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/bsp/shell
+    version: 79d506e686ec743ad961ab76c732af96313db54a
+
+  # 两个遥控工程使用同一固定版本的公共组件。
+  battery_level:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/middleware/battery_level
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454
+  blackbox_service:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/middleware/blackbox_service
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454
+  espnow_remote:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/product/espnow_remote
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454
+  espnow_service_remote:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/product/espnow_service_remote
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454
+  espnow_link:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/middleware/espnow_link
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454
+  diagnostic_log:
+    git: https://github.com/qingmeijiupiao/wireless-power-components.git
+    path: components/common/diagnostic_log
+    version: 15525b7a2d3cc0694bbc0b65dcac8335cd73d454

@@ -1,0 +1,105 @@
+name: Wireless Power Emergency Stop Release
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: write
+
+concurrency:
+  group: wireless-power-emergency-stop-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish firmware
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          submodules: recursive
+          fetch-depth: 0
+
+      - name: Extract version
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME#v}"
+          if [[ ! "${TAG}" =~ ^[0-9]+\.[0-9]+(\.0)?$ ]]; then
+            echo "Tag must match vMAJOR.MINOR or vMAJOR.MINOR.0" >&2
+            exit 1
+          fi
+          MAJOR="${TAG%%.*}"
+          MINOR="${TAG#*.}"
+          MINOR="${MINOR%%.*}"
+          echo "major=${MAJOR}" >> "${GITHUB_OUTPUT}"
+          echo "minor=${MINOR}" >> "${GITHUB_OUTPUT}"
+          echo "full=${MAJOR}.${MINOR}.0" >> "${GITHUB_OUTPUT}"
+
+      - name: Build release firmware
+        uses: espressif/esp-idf-ci-action@v1
+        with:
+          esp_idf_version: v6.0
+          target: esp32c3
+          path: ./
+          command: idf.py -DVERSION_MAJOR=${{ steps.version.outputs.major }} -DVERSION_MINOR=${{ steps.version.outputs.minor }} -DVERSION_PATCH=0 build
+
+      - name: Prepare release artifacts
+        id: artifacts
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.full }}
+        run: |
+          set -euo pipefail
+          APP_NAME="Wireless_power_emergency_stop_app_v${VERSION}.bin"
+          MERGED_NAME="Wireless_power_emergency_stop_merged_v${VERSION}.bin"
+          cp build/Wireless_power_emergency_stop.bin "${APP_NAME}"
+          cp Wireless_power_emergency_stop_merged.bin "${MERGED_NAME}"
+          sha256sum "${APP_NAME}" "${MERGED_NAME}" > SHA256SUMS
+          echo "app_name=${APP_NAME}" >> "${GITHUB_OUTPUT}"
+          echo "merged_name=${MERGED_NAME}" >> "${GITHUB_OUTPUT}"
+
+      - name: Validate firmware layout
+        shell: python
+        env:
+          APP_NAME: ${{ steps.artifacts.outputs.app_name }}
+          MERGED_NAME: ${{ steps.artifacts.outputs.merged_name }}
+        run: |
+          import os
+          from pathlib import Path
+
+          app = Path(os.environ["APP_NAME"]).read_bytes()
+          merged = Path(os.environ["MERGED_NAME"]).read_bytes()
+          app_offset = 0x10000
+          app_partition_size = 0x100000
+          nvs_start = 0x9000
+          nvs_end = 0xF000
+
+          if not app or len(app) > app_partition_size:
+              raise SystemExit(f"invalid APP size: {len(app)}")
+          if len(merged) < app_offset + len(app):
+              raise SystemExit("merged image does not contain the complete APP image")
+          if merged[app_offset:app_offset + len(app)] != app:
+              raise SystemExit("APP image is not aligned at 0x10000 in merged image")
+          if any(value != 0xFF for value in merged[nvs_start:nvs_end]):
+              raise SystemExit("merged image NVS range 0x9000-0xEFFF is not blank")
+
+      - name: Create private prerelease
+        uses: softprops/action-gh-release@v2
+        with:
+          prerelease: true
+          fail_on_unmatched_files: true
+          generate_release_notes: true
+          body: |
+            Emergency Stop OLED bring-up firmware (DEMO).
+            Wireless control and deep sleep are not enabled yet.
+            APP: flash at 0x10000, preserving NVS when layout is unchanged.
+            Merged: flash at 0x0; clears NVS pairing/calibration data.
+            Download requires access to this private repository.
+          files: |
+            ${{ steps.artifacts.outputs.app_name }}
+            ${{ steps.artifacts.outputs.merged_name }}
+            SHA256SUMS
