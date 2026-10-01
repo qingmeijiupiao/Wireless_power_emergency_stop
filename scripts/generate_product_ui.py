@@ -27,23 +27,33 @@ statuses=[
  state('unpaired','正在配对','对端配对','未连接')]
 emit('kProductStates',statuses,'[20][1024]')
 emit('kProductRetry',[state('stopping','关闭未确认','仍在重试','待确认')],'[1][1024]')
-charge=Image.new('1',(128,64));ImageDraw.Draw(charge).polygon([(103,46),(96,54),(101,54),(98,59),(108,51),(102,51)],fill=1)
+charge=Image.new('1',(128,64));ImageDraw.Draw(charge).polygon([(77,47),(73,53),(76,53),(74,58),(79,51),(76,51)],fill=1)
 emit('kProductCharge',[charge],'[1][1024]')
 messages=[state('moon','准备休眠','按键可唤醒'),state('usb','无法休眠','请拔电源'),
  state('on','无法休眠','请先关闭','开启'),state('stopping','无法休眠','等待确认','待确认'),
  state('starting','暂不可操作','等待完成','待确认'),state('ready','请松开按键','随后操作'),
  state('sun','常亮已开','设置已保存'),state('protected','保存失败','重新操作'),
  state('unpaired','正在配对','对端配对','未连接'),state('unpaired','删除配对','再次确认'),
- state('sun','常亮已关','设置已保存'),state('battery','电量偏低','请接电源',soc=8)]
-emit('kProductMessages',messages,'[12][1024]')
+ state('sun','常亮已关','设置已保存'),state('battery','电量偏低','请接电源',soc=8),state('moon','休眠时间','设置已保存')]
+emit('kProductMessages',messages,'[13][1024]')
 menus=[]; confirms=[]
 for mode in [False,True]:
  p['MENU'][1]='常亮已开' if mode else '常亮已关'
  menus.extend(menu(i) for i in range(7))
- for title,symbol in [('返回主页','return'),('关闭常亮' if mode else '开启常亮','sun'),('进入休眠','moon'),('关闭输出','off'),('开始配对','unpaired'),('重新配对','unpaired'),('设备状态','info'),('删除配对','unpaired')]:
+ for title,symbol in [('返回主页','return'),('关闭常亮' if mode else '开启常亮','sun'),('进入休眠','moon'),('休眠时间','moon'),('开始配对','unpaired'),('重新配对','unpaired'),('设备信息','info'),('删除配对','unpaired')]:
   confirms.extend([confirm(title,symbol,False),confirm(title,symbol,True)])
 emit('kProductMenus',menus,'[14][1024]')
 emit('kProductConfirms',confirms,'[32][1024]')
+sleep_menus=[]
+for selected in range(4):
+ im=Image.new('1',(128,64));d=ImageDraw.Draw(im)
+ p['center'](d,'休眠时间',2)
+ for label,y,chosen in [(('5m','10m','30m','1h')[(selected-1)%4],18,False),(('5m','10m','30m','1h')[selected],31,True),(('5m','10m','30m','1h')[(selected+1)%4],44,False)]:
+  if chosen:d.rounded_rectangle((2,y-1,68,y+10),radius=2,fill=1)
+  p['center'](d,label,y,p['FOOT'],fill=0 if chosen else 1)
+ p['center'](d,'短选 长保存',54,p['FOOT']);sleep_menus.append(im)
+emit('kSleepTimeMenus',sleep_menus,'[4][1024]')
+emit('kProductFailure',[state('offline','连接失败','短按重试','未连接')],'[1][1024]')
 rails=[]
 for status in ['关闭','开启','待确认','未连接']:
  im=Image.new('1',(128,64));rail(im,status)
@@ -70,9 +80,19 @@ for row,label in enumerate('VAW'):
   for x,value in enumerate(line):
    if value=='#':d.point((58+x,top+3+y),fill=1)
 emit('kProductHome',[home],'[1][1024]')
-for name,label,y,font in [('kHistoryFooter','上次原因',54,p['FOOT']),('kInfoTitle','电池电压',3,p['CN']),('kInfoFooter','按键返回',52,p['FOOT']),('kFailureHint','短按重试',52,p['CN']),('kSleepCountdown','秒后休眠',33,p['FOOT']),('kBlankCountdown','秒后熄屏',33,p['FOOT']),('kInfoUsb','外部供电',40,p['FOOT']),('kInfoBattery','电池供电',40,p['FOOT'])]:
+for name,label,y,font in [('kHistoryFooter','上次原因',54,p['FOOT']),('kInfoTitle','设备信息',3,p['CN']),('kInfoFooter','短翻 长返回',54,p['FOOT']),('kFailureHint','短按重试',54,p['FOOT']),('kSleepSoonTitle','即将休眠',2,p['CN']),('kSleepCancel','按键取消',54,p['FOOT']),('kInfoUsb','外部供电',40,p['FOOT']),('kInfoBattery','电池供电',40,p['FOOT'])]:
  im=Image.new('1',(128,64));p['center'](ImageDraw.Draw(im),label,y,font)
  emit(name,[im],'[1][1024]')
+for name,label in [('kFirmwareTitle','固件信息'),('kBlackboxTitle','黑匣子'),('kLogTitle','记录状态')]:
+ im=Image.new('1',(128,64));p['center'](ImageDraw.Draw(im),label,3,p['CN']);emit(name,[im],'[1][1024]')
+for name,label,y in [('kRecordLabel','记录',18),('kCapacityLabel','容量',30),('kPendingLabel','待写',42),('kCapturedLabel','捕获',18),('kDroppedLabel','丢失',30),('kFailedLabel','失败',42)]:
+ im=Image.new('1',(128,64));p['text'](ImageDraw.Draw(im),1,y,label,p['FOOT']);emit(name,[im],'[1][1024]')
+im=Image.new('1',(128,64));p['center'](ImageDraw.Draw(im),'未启用',29,p['CN']);emit('kBlackboxUnavailable',[im],'[1][1024]')
+font=ImageFont.truetype('C:/Windows/Fonts/consola.ttf',10)
+ascii_glyphs=[]
+for code in range(32,127):
+ im=Image.new('1',(6,8));d=ImageDraw.Draw(im);d.text((0,-font.getbbox('0')[1]),chr(code),font=font,fill=1);ascii_glyphs.append(im)
+emit('kInfoAscii',ascii_glyphs,'[95][6]')
 # Regular numeric font with identical baseline and narrow decimal point as approved preview.
 font=ImageFont.truetype('C:/Windows/Fonts/consola.ttf',19)
 glyphs=[]
@@ -98,5 +118,5 @@ for ch in '0123456789':
  im=Image.new('1',(13,24));d=ImageDraw.Draw(im);b=font.getbbox(ch)
  d.text((-b[0],-font.getbbox('0')[1]),ch,font=font,fill=1);glyphs.append(im)
 emit('kCountdownDigits',glyphs,'[10][39]')
-(ROOT/'components/app/emergency_ui/product_pages.h').write_text('\n'.join(output)+'\n',encoding='utf-8')
+(ROOT/'components/app/emergency_ui/private_include/product_pages.h').write_text('\n'.join(output)+'\n',encoding='utf-8')
 print('Product bitmap assets generated; all templates 128x64 with text boundary checks.')

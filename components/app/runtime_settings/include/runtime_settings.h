@@ -1,8 +1,30 @@
 #pragma once
 #include <cstdint>
+
+/**
+ * @file runtime_settings.h
+ * @brief 急停控制器运行参数的类型化访问与持久化接口
+ */
 namespace RuntimeSettings {
+
+// 自动休眠时间菜单的候选值(ms)：5、10、30、60 分钟，下标供 UI 选择使用。
+constexpr uint32_t kSleepTimesMs[] = {300000, 600000, 1800000, 3600000};
+
+// 从 NVS 载入全部参数到原子缓存，必须在其它模块读取前调用一次。
 void init();
-uint32_t get(const char* name);
-bool set(const char* name, uint32_t value);
+
+// 查询/切换“常亮(禁止自动休眠)”开关，切换结果会持久化。
+bool always_on();
+bool set_always_on(bool enabled);
+
+// 按名称读取/写入整型参数；get 对未知名称返回 0，set 会做范围校验。
+uint32_t get(const char *name);
+bool set(const char *name, uint32_t value);
+
+// 将当前全部参数及其有效范围打印到标准输出(命令层使用)。
 void print();
-}
+
+// 把当前全部参数写入黑匣子，作为一次配置快照。
+void record_snapshot();
+
+} // namespace RuntimeSettings

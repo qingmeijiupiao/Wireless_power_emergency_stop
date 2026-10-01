@@ -86,8 +86,8 @@ def rail(im,state='关闭',soc=30,charging=False):
         d.line([(92,5),(92,8),(108,18),(108,20)],fill=1,width=2);d.line([(109,5),(109,8),(93,18),(93,20)],fill=1,width=2)
     center(d,state,26,CN,72,56)
     d.rounded_rectangle((80,44,120,61),radius=2,outline=1);d.rectangle((121,49,123,56),fill=1)
-    if charging:d.polygon([(103,46),(96,54),(101,54),(98,59),(108,51),(102,51)],fill=1)
-    else:center(d,f'{soc}%',49,SOC,81,39)
+    if charging:d.polygon([(77,47),(73,53),(76,53),(74,58),(79,51),(76,51)],fill=1)
+    center(d,f'{soc}%',49,SOC,81,39)
 
 def state_page(name,title,footer,state='关闭',soc=30):
     im=Image.new('1',(128,64));im.paste(symbol(name),(11,1));d=ImageDraw.Draw(im)
@@ -95,11 +95,9 @@ def state_page(name,title,footer,state='关闭',soc=30):
 
 def failed(critical=False,usb=False):
     if critical:return state_page('stopping','关闭未确认','仍在重试','待确认')
-    im=Image.new('1',(128,64));d=ImageDraw.Draw(im)
-    center(d,'180',8,BIG);center(d,'秒后熄屏' if usb else '秒后休眠',33,FOOT)
-    center(d,'短按重试',52);rail(im,'未连接');return im
+    return state_page('offline','连接失败','短按重试','未连接')
 
-MENU=['返回主页','常亮已关','手动休眠','关闭输出','开始配对','重新配对','设备状态']
+MENU=['返回主页','常亮已关','手动休眠','休眠时间','开始配对','重新配对','设备信息']
 def menu(selected):
     im=Image.new('1',(128,64));d=ImageDraw.Draw(im)
     center(d,MENU[(selected-1)%7],4)
@@ -141,7 +139,7 @@ GROUPS={
  ('连接中',state_page('unpaired','正在连接','请稍候','待确认')),
  ('未配对：长按进入菜单',state_page('unpaired','尚未配对','长按菜单','未连接')),
  ('失败等待：电池供电',failed()),
- ('失败等待：插电仅熄屏',failed(usb=True)),
+ ('失败等待：插电保持显示',failed(usb=True)),
  ('正在配对：需要对端参与',state_page('unpaired','正在配对','对端配对','未连接')),
  ('配对成功：仍须确认关闭',state_page('check','配对成功','同步关闭','待确认'))],
  'menus':[
@@ -150,7 +148,7 @@ GROUPS={
  ('开启常亮：默认取消',confirm('开启常亮','sun')),
  ('休眠确认：选中确认',confirm('进入休眠','moon',True)),
  ('重新配对：第二次确认',confirm('删除配对','unpaired')),
- ('设备状态：电压与 SOC',info())],
+ ('设备信息：电压与 SOC',info())],
  'power':[
  ('插电：休眠被阻止',state_page('usb','无法休眠','请拔电源')),
  ('输出开启：休眠被阻止',state_page('on','无法休眠','请先关闭','开启')),

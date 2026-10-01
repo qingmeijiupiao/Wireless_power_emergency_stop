@@ -1,3 +1,8 @@
+#/**
+# * @file components/app/shell_command/CMakeLists.txt
+# * @brief Shell 命令组件构建定义与公开/私有依赖
+# */
+
 idf_component_register(
     SRCS "src/shell_command.cpp"
     INCLUDE_DIRS "include"
@@ -6,11 +11,12 @@ idf_component_register(
         battery_voltage
         blackbox
         blackbox_service
-        espnow_remote
-        espnow_service_remote
+        emergency_remote
+        emergency_ui
+        hardware
         power_manager
+        runtime_settings
         shell
-        status_led
         esp_system
         esp_timer
 )

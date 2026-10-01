@@ -137,7 +137,7 @@ def build():
     header.append('};')
     header.append('static const char* const kPageNames[] = {' + ','.join('"'+name+'"' for name in names) + '};')
     header.append(f'static constexpr int kPageCount = {len(images)};')
-    (ROOT/'components/app/emergency_ui/pages.h').write_text('\n'.join(header)+'\n', encoding='utf-8')
+    (ROOT/'components/app/emergency_ui/private_include/pages.h').write_text('\n'.join(header)+'\n', encoding='utf-8')
     out = ROOT/'tmp/ui-previews'; out.mkdir(parents=True, exist_ok=True)
     sheet = Image.new('RGB', (3*404, ((len(images)+2)//3)*230), '#202329')
     for n, im in enumerate(images):

@@ -1,53 +1,26 @@
-/*
- * @version: 1.0
- * @LastEditors: qingmeijiupiao
- * @Description: 低功耗启动判定与深度休眠管理
- * @author: qingmeijiupiao
- * @LastEditTime: 2026-06-07
+/**
+ * @file power_manager.h
+ * @brief 电源管理对外接口：睡眠阻塞判定、静置倒计时与深睡进入流程。
  */
-#ifndef POWER_MANAGER_H
-#define POWER_MANAGER_H
-
-#include <cstdint>
-
-#include "esp_err.h"
-
+#pragma once
+#include "sleep_policy.h"
 namespace PowerManager {
-
-constexpr uint32_t LONG_PRESS_MS = 1000;
-
-enum class WakeSource {
-    POWER_ON,
-    BUTTON,
-    USB,
-    BUTTON_AND_USB,
-    OTHER,
+// 显示相关回调，由上层注入：深睡前 prepare/shutdown，睡眠中止后 restore。
+struct DisplayHooks {
+    void (*prepare)();
+    void (*shutdown)();
+    void (*restore)();
 };
-
-/**
- * @brief 初始化 GPIO4 按键和 GPIO5 USB 检测输入
- */
-esp_err_t init();
-
-/** @brief 获取本次启动的唤醒来源。 */
-WakeSource wake_source();
-
-/** @brief GPIO5 为高电平时返回 true。 */
-bool usb_connected();
-
-/** @brief GPIO4 为低电平时返回 true。 */
-bool button_pressed();
-
-/** @brief 返回从 app_main 开始到当前的毫秒数，用于唤醒按键计时。 */
-uint32_t button_press_elapsed_ms();
-
-/**
- * @brief 配置 GPIO4 低电平和 GPIO5 高电平唤醒并进入深度休眠
- *
- * GPIO4 未释放或 GPIO5 仍为高电平时返回 ESP_ERR_INVALID_STATE。
- */
-esp_err_t enter_deep_sleep();
-
+/** 调用时机：GPIO 初始化之后、无线初始化启动前；消耗 RTC 睡眠标记判断是否由触点释放唤醒。 */
+bool consume_release_wake();
+// 返回当前睡眠阻塞原因（USB/输出/状态未知/忙/按钮），见 sleep_policy.h。
+SleepBlock block();
+// 初始化静置计时基准与倒计时状态。
+void init_idle(int64_t now_us);
+// 记录一次用户活动，刷新静置起点。
+void note_activity(int64_t now_us);
+// 评估静置与提醒截止时间，产出倒计时方案；failed 用于 always_on 模式下兜底允许睡眠。
+SleepPlan plan(int64_t now_us, int64_t notice_deadline, bool notice_allowed, bool failed);
+/** 可能不返回。在关闭显示与同步日志之后再次复查输入/输出安全，再进入深睡。 */
+int enter_sleep(const DisplayHooks &display, bool manual);
 } // namespace PowerManager
-
-#endif

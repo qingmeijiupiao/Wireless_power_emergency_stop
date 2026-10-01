@@ -1,154 +1,163 @@
-/*
- * @version: 1.0
- * @LastEditors: qingmeijiupiao
- * @Description: ESP32-C3 GPIO 唤醒与深度休眠实现
- * @author: qingmeijiupiao
- * @LastEditTime: 2026-06-07
+/**
+ * @file power_manager.cpp
+ * @brief 电源管理实现：睡眠阻塞判定、60 秒静置倒计时与深睡进入/中止恢复流程。
  */
 #include "power_manager.h"
-
-#include <algorithm>
-
-#include "battery_voltage.h"
-#include "driver/gpio.h"
-#include "esp_check.h"
+#include "hardware.h"
+#include "battery_level.h"
+#include "emergency_remote.h"
+#include "runtime_settings.h"
+#include "blackbox.h"
+#include "blackbox_service.h"
+#include "diagnostic_log.h"
 #include "esp_sleep.h"
+#include "esp_attr.h"
 #include "esp_timer.h"
+#include "esp_log.h"
+#include "driver/usb_serial_jtag.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "status_led.h"
-
 namespace PowerManager {
 namespace {
-
-constexpr gpio_num_t BUTTON_GPIO = GPIO_NUM_4;
-constexpr gpio_num_t USB_DETECT_GPIO = GPIO_NUM_5;
-// 深睡前将与当前唤醒无关的引脚统一切换为高阻，避免内部上下拉或输出保持
-// 形成额外漏电路径。列表包含板级改线和 USB/JTAG 相关引脚。
-constexpr gpio_num_t HIGH_IMPEDANCE_SLEEP_GPIOS[] = {
-    GPIO_NUM_2,  // 电池分压下端控制
-    GPIO_NUM_3,  // 电池分压 ADC 中点
-    GPIO_NUM_7,  // 板级改线后与 USB 检测信号同网
-    GPIO_NUM_8,  // 外部 10 kOhm 上拉
-    GPIO_NUM_9,  // BOOT，外部 10 kOhm 上拉
-    GPIO_NUM_18, // USB D-
-    GPIO_NUM_19, // USB D+
-};
-
-int64_t app_started_us;
-WakeSource source = WakeSource::OTHER;
-
-esp_err_t configure_inputs() {
-    gpio_config_t config = {};
-    config.pin_bit_mask = (1ULL << BUTTON_GPIO) | (1ULL << USB_DETECT_GPIO);
-    config.mode = GPIO_MODE_INPUT;
-    config.pull_up_en = GPIO_PULLUP_DISABLE;
-    config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    config.intr_type = GPIO_INTR_DISABLE;
-    return gpio_config(&config);
-}
-
-esp_err_t configure_wakeup_inputs_for_sleep() {
-    gpio_config_t config = {};
-    config.pin_bit_mask = (1ULL << BUTTON_GPIO) | (1ULL << USB_DETECT_GPIO);
-    config.mode = GPIO_MODE_INPUT;
-    config.pull_up_en = GPIO_PULLUP_DISABLE;
-    config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-    config.intr_type = GPIO_INTR_DISABLE;
-    return gpio_config(&config);
-}
-
-esp_err_t isolate_unused_sleep_pins() {
-    for (const gpio_num_t gpio : HIGH_IMPEDANCE_SLEEP_GPIOS) {
-        gpio_config_t config = {};
-        config.pin_bit_mask = 1ULL << gpio;
-        config.mode = GPIO_MODE_DISABLE;
-        config.pull_up_en = GPIO_PULLUP_DISABLE;
-        config.pull_down_en = GPIO_PULLDOWN_DISABLE;
-        config.intr_type = GPIO_INTR_DISABLE;
-
-        const esp_err_t ret = gpio_config(&config);
-        if (ret != ESP_OK) {
-            return ret;
-        }
-    }
-    return ESP_OK;
-}
-
-void release_sleep_pin_holds() {
-    gpio_deep_sleep_hold_dis();
-}
-
+using namespace Hardware;
+constexpr char TAG[] = "PowerManager";
+constexpr char kEventTag[] = "ProductEvent";
+// RTC 保留内存中的睡眠标记与触点状态：深睡后复位不清除，用于唤醒时判断是否由“释放”触发。
+RTC_DATA_ATTR uint32_t sleep_cookie = 0;
+RTC_DATA_ATTR bool sleep_contact_low = false;
+// 睡眠标记魔数：仅当精确匹配且与触点状态一致时才认为是合法的释放唤醒。
+constexpr uint32_t kSleepCookie = 0x45535450;
+int64_t activity_at = 0;       // 最近一次用户活动时间（微秒），作为静置计时起点
+SleepCountdown countdown;      // 静置倒计时状态机
+bool countdown_active = false; // 上一次评估是否处于倒计时，仅用于状态变化时打点
 } // namespace
-
-esp_err_t init() {
-    app_started_us = esp_timer_get_time();
-    release_sleep_pin_holds();
-    ESP_RETURN_ON_ERROR(configure_inputs(), "PowerManager", "wakeup GPIO config failed");
-
-    const uint32_t causes = esp_sleep_get_wakeup_causes();
-    const uint64_t gpio_status = esp_sleep_get_gpio_wakeup_status();
-    const bool button_wakeup =
-        (causes & BIT(ESP_SLEEP_WAKEUP_GPIO)) != 0 &&
-        (gpio_status & (1ULL << BUTTON_GPIO)) != 0;
-    const bool usb_wakeup =
-        (causes & BIT(ESP_SLEEP_WAKEUP_GPIO)) != 0 &&
-        (gpio_status & (1ULL << USB_DETECT_GPIO)) != 0;
-
-    if (button_wakeup && usb_wakeup) {
-        source = WakeSource::BUTTON_AND_USB;
-    } else if (button_wakeup) {
-        source = WakeSource::BUTTON;
-    } else if (usb_wakeup) {
-        source = WakeSource::USB;
-    } else if (causes == 0) {
-        source = WakeSource::POWER_ON;
-    } else {
-        source = WakeSource::OTHER;
+// 启动早期调用：仅当本次由 GPIO 唤醒、睡眠标记有效、入睡时触点闭合且现在已释放时返回 true。
+bool consume_release_wake() {
+    const bool released = (esp_sleep_get_wakeup_causes() & (1U << ESP_SLEEP_WAKEUP_GPIO)) != 0 &&
+                          sleep_cookie == kSleepCookie && sleep_contact_low && !Hardware::stop_closed();
+    sleep_cookie = 0;
+    return released;
+}
+// 初始化静置基准并清空倒计时，避免沿用上一轮残留状态。
+void init_idle(int64_t now_us) {
+    activity_at = now_us;
+    countdown = {};
+    countdown_active = false;
+}
+// 刷新活动时间：任何用户交互都会把静置截止时间向后推。
+void note_activity(int64_t now_us) { activity_at = now_us; }
+// 计算静置截止时间（取活动时间与提醒截止的较晚者），并在允许且无阻塞时推进倒计时。
+SleepPlan plan(int64_t now_us, int64_t notice_deadline, bool notice_allowed, bool failed) {
+    int64_t deadline = activity_at + RuntimeSettings::get("idle_ms") * 1000LL;
+    if (notice_deadline > deadline)
+        deadline = notice_deadline;
+    // always_on 模式默认禁止睡眠，仅在 failed 兜底时才允许；同时必须不存在任何睡眠阻塞。
+    const bool allowed = (!RuntimeSettings::always_on() || failed) && block() == SleepBlock::None;
+    const auto result = countdown.update(now_us, deadline, allowed && notice_allowed);
+    if (result.countdown != countdown_active) {
+        DEVICE_EVENT_I(kEventTag, "sleep countdown %s seconds=%lu",
+                       result.countdown ? "started"
+                       : result.due     ? "completed"
+                                        : "cancelled",
+                       static_cast<unsigned long>(result.seconds));
+        countdown_active = result.countdown;
     }
-    return ESP_OK;
+    return result;
+}
+// 汇总硬件电平与遥控快照，映射为睡眠阻塞原因：
+// USB=检测到外部供电；输出=输出接通或状态新鲜但未知；忙=遥控事务/配对中；按钮=按键按下。
+SleepBlock block() {
+    const auto s = EmergencyRemote::snapshot();
+    return sleep_block(gpio_get_level(kVbusDetect), s.output_on,
+                       s.connection_failed || (s.output_time_us > 0 && esp_timer_get_time() - s.output_time_us <
+                                                                           RuntimeSettings::get("fresh_ms") * 1000LL),
+                       s.busy || s.pairing, gpio_get_level(kUiButton) == 0);
 }
 
-WakeSource wake_source() {
-    return source;
-}
-
-bool usb_connected() {
-    return gpio_get_level(USB_DETECT_GPIO) != 0;
-}
-
-bool button_pressed() {
-    return gpio_get_level(BUTTON_GPIO) == 0;
-}
-
-uint32_t button_press_elapsed_ms() {
-    const int64_t elapsed_us = std::max<int64_t>(0, esp_timer_get_time() - app_started_us);
-    return static_cast<uint32_t>(elapsed_us / 1000);
-}
-
-esp_err_t enter_deep_sleep() {
-    if (button_pressed() || usb_connected()) {
-        return ESP_ERR_INVALID_STATE;
+// 进入深睡主流程；可能不返回。依次：前置判定 -> 无线握手 -> 配置唤醒源 -> 关显示
+// -> 同步黑匣子 -> 隔离 GPIO/USB -> 安全复查 -> 触发深睡；任一环节被唤醒或复核失败则中止并恢复。
+int enter_sleep(const DisplayHooks &display, bool manual) {
+    BatteryLevel::Status battery = {};
+    (void)BatteryLevel::get_status(battery);
+    // 先做一次快速阻塞判定，避免无谓地走完整流程。
+    auto reason = block();
+    DEVICE_EVENT_I(kEventTag, "sleep request source=%s block=%u battery_mv=%d soc=%d", manual ? "manual" : "idle",
+                   static_cast<unsigned>(reason), battery.voltage_mv,
+                   static_cast<int>(battery.displayed_percent));
+    if (reason != SleepBlock::None)
+        return static_cast<int>(reason);
+    // 与遥控工作线程握手：让其把未完成的开关/配对事务处理干净再睡。
+    if (!EmergencyRemote::prepare_sleep()) {
+        DEVICE_EVENT_I(kEventTag, "sleep denied: remote not quiesced");
+        return 4;
     }
-
-    ESP_RETURN_ON_ERROR(StatusLed::prepare_for_sleep(),
-                        "PowerManager", "LED sleep state failed");
-    ESP_RETURN_ON_ERROR(BatteryVoltage::disable_sample_path(),
-                        "PowerManager", "battery divider disable failed");
-    ESP_RETURN_ON_ERROR(configure_wakeup_inputs_for_sleep(),
-                        "PowerManager", "wakeup GPIO reconfigure failed");
-    ESP_RETURN_ON_ERROR(isolate_unused_sleep_pins(),
-                        "PowerManager", "unused GPIO isolation failed");
-    ESP_RETURN_ON_ERROR(
-        esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(
-            1ULL << BUTTON_GPIO, ESP_GPIO_WAKEUP_GPIO_LOW),
-        "PowerManager", "button wakeup config failed");
-    ESP_RETURN_ON_ERROR(
-        esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(
-            1ULL << USB_DETECT_GPIO, ESP_GPIO_WAKEUP_GPIO_HIGH),
-        "PowerManager", "USB wakeup config failed");
-    esp_deep_sleep_start();
-    return ESP_FAIL;
+    // 记录入睡时的急停触点状态，唤醒时将据此判断是“闭合”还是“释放”边沿。
+    const bool contact_low = gpio_get_level(kStopButton) == 0;
+    esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
+    // 配置 GPIO 唤醒源：按钮低电平、USB 插入高电平，急停触点按当前状态取反边沿。
+    esp_err_t err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(1ULL << kUiButton, ESP_GPIO_WAKEUP_GPIO_LOW);
+    if (err == ESP_OK)
+        err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(1ULL << kVbusDetect, ESP_GPIO_WAKEUP_GPIO_HIGH);
+    if (err == ESP_OK)
+        err = esp_sleep_enable_gpio_wakeup_on_hp_periph_powerdown(
+            1ULL << kStopButton, contact_low ? ESP_GPIO_WAKEUP_GPIO_HIGH : ESP_GPIO_WAKEUP_GPIO_LOW);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "sleep wake configuration failed: %s", esp_err_to_name(err));
+        EmergencyRemote::cancel_sleep();
+        return 7;
+    }
+    // 先关闭显示，降低睡眠过程中的功耗与干扰，再同步黑匣子。
+    display.prepare();
+    display.shutdown();
+    if (Blackbox::is_enabled()) {
+        DEVICE_EVENT_I(kEventTag, "deep sleep entry source=%s battery_mv=%d soc=%d contact_low=%u wake=GPIO3/4/5",
+                       manual ? "manual" : "idle", battery.voltage_mv,
+                       static_cast<int>(battery.displayed_percent), contact_low);
+        const auto sync_err = BlackboxService::sync();
+        if (sync_err != ESP_OK)
+            ESP_LOGW(TAG, "Blackbox sleep sync failed: %s", esp_err_to_name(sync_err));
+    }
+    // 隔离屏幕总线、电池分压与屏供电，防止深睡期间漏电。
+    Hardware::disconnect_screen_bus();
+    Hardware::disconnect_battery_divider();
+    Hardware::screen_power(false);
+    // 在较慢的 I2C 关断之后再次复查，此时遥控工作线程仍然存活。
+    reason = block();
+    // 复查未通过（出现新阻塞、触点状态变化或遥控不再静止）则取消睡眠并恢复显示。
+    if (reason != SleepBlock::None || contact_low != (gpio_get_level(kStopButton) == 0) ||
+        !EmergencyRemote::snapshot().quiesced) {
+        DEVICE_EVENT_I(kEventTag, "sleep aborted before entry block=%u contact_changed=%u",
+                       static_cast<unsigned>(reason), contact_low != (gpio_get_level(kStopButton) == 0));
+        EmergencyRemote::cancel_sleep();
+        Hardware::screen_power(true);
+        vTaskDelay(pdMS_TO_TICKS(100));
+        display.restore();
+        return reason == SleepBlock::None ? 4 : static_cast<int>(reason);
+    }
+    // 记录触点状态并写入睡眠标记，供唤醒时的 consume_release_wake() 校验。
+    sleep_contact_low = contact_low;
+    sleep_cookie = kSleepCookie;
+    // 把 GPIO 配置为深睡所需的隔离态（隔离/上拉/浮动）。
+    configure_sleep_gpio();
+    ESP_LOGI(TAG,
+             "SLEEP_GPIO gpio0/6/10=isolated hold=off; gpio3=pullup gpio4=floating gpio5=external-pullup");
+    Hardware::dump_sleep_gpio();
+    ESP_LOGI(TAG, "DEEP_SLEEP contact_low=%u wake=GPIO3/4/5", contact_low);
+    // 此处之后原生 USB 将不可用；若入睡途中被唤醒而深睡被拒绝，需通过驱动恢复其 PHY。
+    (void)usb_serial_jtag_wait_tx_done(pdMS_TO_TICKS(20));
+    isolate_usb_for_sleep();
+    err = esp_deep_sleep_try_to_start();
+    // 入睡途中到来的唤醒信号会中止深睡；以下代码负责恢复屏幕与各项服务。
+    sleep_cookie = 0;
+    release_sleep_holds();
+    restore_usb_after_sleep_abort();
+    Hardware::restore_screen_pin();
+    EmergencyRemote::cancel_sleep();
+    Hardware::screen_power(true);
+    vTaskDelay(pdMS_TO_TICKS(100));
+    display.restore();
+    ESP_LOGW(TAG, "SLEEP_ENTRY_ABORTED %s", esp_err_to_name(err));
+    DEVICE_EVENT_I(kEventTag, "sleep rejected by hardware: %s", esp_err_to_name(err));
+    return 4;
 }
-
 } // namespace PowerManager
