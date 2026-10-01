@@ -1,13 +1,22 @@
 /**
  * @file button_input.h
- * @brief 按键输入接口：读取 BOOT 键并经过消抖策略输出短按/长按手势。
+ * @brief BOOT 按键输入适配：基于公共 Button 组件，把按键手势转换为 UI 可消费的事件队列。
  */
 #pragma once
-#include "button_policy.h"
+#include <cstdint>
 namespace ButtonInput {
-/** Suppress a BOOT key held during wake until it is released. */
-// 初始化按键，并抑制唤醒时仍被按住的 BOOT 键，直到其释放，避免把唤醒动作识别成一次按键。
+/** UI 关心的逻辑按键事件；只暴露手势，按下/释放边沿不进入 UI 状态机。 */
+enum class Event : uint8_t {
+    None = 0, /**< 无事件，用于无按键的周期调用占位。 */
+    Short,    /**< 短按。 */
+    Long,     /**< 长按。 */
+};
+/** @brief 初始化 GPIO3 上的按键驱动并准备事件队列。 */
 void init();
-// 按当前时刻采样按键并返回本次产生的手势；无手势返回 Gesture::None。
-Gesture poll(int64_t now_us);
+/**
+ * @brief 非阻塞读取一个按键事件。
+ * @param event 输出事件；无事件时保持不变。
+ * @return true 表示取到事件。
+ */
+bool poll(Event& event);
 } // namespace ButtonInput

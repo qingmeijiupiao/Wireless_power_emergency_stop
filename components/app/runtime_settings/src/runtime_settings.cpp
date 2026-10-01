@@ -32,8 +32,8 @@ struct Entry {
 };
 // 全部可配置运行参数的名称、默认值/初值与有效范围。单位说明：
 //   connect_ms 遥控连接超时；idle_ms 空闲自动休眠；menu_idle_ms 菜单停留；
-//   notice_ms 休眠前提示时长；release_ms 长按后的释放窗口；debounce_ms 按键去抖；
-//   long_ms 长按阈值；off_ack_ms/off_retry_ms 关断确认与重试；on_ack_ms 开启确认；
+//   notice_ms 休眠前提示时长；release_ms 长按后的释放窗口；
+//   off_ack_ms/off_retry_ms 关断确认与重试；on_ack_ms 开启确认；
 //   fresh_ms 数据新鲜度；battery_ms 采样周期；report_ms 电量上报周期；low_mv 低电阈值。
 Entry entries[] = {
     {"connect_ms", {"connect_ms", 10000}, 10000, 1000, 60000},
@@ -41,8 +41,6 @@ Entry entries[] = {
     {"menu_idle_ms", {"menu_idle_ms", 15000}, 15000, 5000, 300000},
     {"notice_ms", {"notice_ms", 30000}, 30000, 5000, 300000},
     {"release_ms", {"release_ms", 100}, 100, 50, 2000},
-    {"debounce_ms", {"debounce_ms", 30}, 30, 10, 200},
-    {"long_ms", {"long_ms", 1000}, 1000, 500, 3000},
     {"off_ack_ms", {"off_ack_ms", 1000}, 1000, 500, 5000},
     {"off_retry_ms", {"off_retry_ms", 3000}, 3000, 1000, 30000},
     {"on_ack_ms", {"on_ack_ms", 5000}, 5000, 1000, 10000},

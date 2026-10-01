@@ -1,48 +1,64 @@
 /**
  * @file emergency_ui.h
- * @brief 定义紧急停机控制器的显示与菜单交互接口：每个刷新周期向内注入输入和状态，向外返回动作与是否重绘。
+ * @brief 急停控制器 UI 公开接口：屏幕初始化、按键输入处理、状态观察与渲染。
  */
 #pragma once
+#include "button_input.h"
 #include "emergency_remote.h"
-#include "button_policy.h"
 #include "sleep_policy.h"
 namespace EmergencyUi {
-// 菜单确认后向业务层上报的动作。成员顺序与菜单条目索引一致，因此条目号可直接转换得到对应动作。
+/** 菜单或提示确认后需要业务层执行的动作。 */
 enum class Action { None, AlwaysOn, Sleep, SleepTime, Pair, Repair };
-// 单次输入处理的结果：请求系统执行的重试、是否产生用户活动（用于阻止休眠），以及休眠时长选择结果。
+/** 一次输入处理的结果，由主循环据此驱动业务动作与静置计时。 */
 struct Update {
-    Action action = Action::None;
-    bool retry = false, activity = false;
-    int sleep_choice = 0;
+    Action action = Action::None; /**< 需要执行的动作 */
+    bool retry = false;           /**< 是否请求重新连接远端 */
+    bool activity = false;        /**< 是否视为用户活动 */
+    int sleep_choice = 0;         /**< 休眠时长选择下标 */
 };
-// 每个刷新周期由业务层组装的输入快照：远端状态、电量、休眠计划、供电方式与当前时刻。
+/** 渲染与状态判定所需的快照模型。 */
 struct Model {
-    EmergencyRemote::Snapshot remote;
-    int battery_mv = 0, battery_percent = -1;  // battery_percent 为 -1 表示百分比未知
-    PowerManager::SleepPlan sleep;
-    bool usb = false, always_on = false;  // usb：检测到外部供电；always_on：常亮模式
-    int64_t now_us = 0;
+    EmergencyRemote::Snapshot remote;      /**< 远端控制与测量快照 */
+    int battery_mv = 0;                    /**< 电池电压，mV；0 表示无效 */
+    int battery_percent = -1;              /**< 显示电量百分比；-1 表示未知 */
+    PowerManager::SleepPlan sleep;         /**< 本次计算的休眠计划 */
+    bool usb = false;                      /**< 是否检测到外部供电 */
+    bool always_on = false;                /**< 是否常亮模式 */
+    int64_t now_us = 0;                    /**< 当前时间，微秒 */
 };
-// 复位菜单与提示状态、恢复持久化的故障历史并初始化显示；不负责硬件或休眠编排。
+/** @brief 初始化屏幕、UI 管理器与故障历史。 */
 void init();
-// 处理一次按键手势，推进菜单/提示状态机并返回需要业务层执行的动作；gesture 为 None 表示无按键。
-Update handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Gesture gesture, int64_t now_us);
-// 观察远端状态变化（如进入保护、断连）并据此触发故障/低电提示，返回本周期是否产生用户可见活动。
+/**
+ * @brief 处理一次按键事件并推进 UI 状态机。
+ * @param remote 处理开始时的远端快照
+ * @param event 按键事件；Event::None 表示无按键的周期调用
+ * @param tick 当前时间，微秒
+ * @return 本次处理产生的动作与活动标记
+ */
+Update handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t tick);
+/**
+ * @brief 观察远端与电池状态，触发状态跳变与低电提示。
+ * @return true 表示发生了应计为用户活动的变化
+ */
 bool observe_state(const Model &model);
-// 按页面选择优先级绘制一帧；force_dirty 为真时强制重绘。
+/**
+ * @brief 按当前状态渲染一帧并写入屏幕。
+ * @param model 渲染模型
+ * @param dirty 是否有强制重绘请求
+ */
 void render(const Model &model, bool dirty);
-// 直接切换到消息页显示编号 message 的文本；touch 为真时同时刷新菜单空闲计时起点。
+/** @brief 显示一条一次性消息页。 */
 void show_message(int message, int64_t now_us, bool touch = false);
-// 返回最近一次故障提示对应的页面编号，无提示时为 -1。
+/** @brief 返回最近一次记录的故障页编号。 */
 int last_fault_page();
-// 返回所有提示（故障提示与低电提示）中最晚的截止时刻，供休眠调度等待提示完整展示。
+/** @brief 返回故障/低电提示的最晚保持截止时刻。 */
 int64_t notice_deadline();
-// 判断此刻是否允许进入休眠提示：没有正在保持的故障提示，且低电提示已结束。
+/** @brief 判断当前是否允许开始休眠倒计时（不在提示保持期内）。 */
 bool sleep_notice_allowed(int64_t now_us);
-// 进入休眠前在屏幕上绘制指定画面，避免屏幕停留在过期数据。
+/** @brief 进入休眠前绘制“即将休眠”画面。 */
 void prepare_sleep();
-// 关闭显示。
+/** @brief 关闭屏幕供电。 */
 void shutdown();
-// 初始化显示并强制下一帧重绘。
+/** @brief 重新初始化屏幕并请求完整重绘。 */
 void restore();
 } // namespace EmergencyUi

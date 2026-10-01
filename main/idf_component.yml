@@ -59,3 +59,7 @@ dependencies:
     git: *wireless_power_components_repo
     path: components/product/espnow_remote
     version: *wireless_power_components_version
+  Button:
+    git: *wireless_power_components_repo
+    path: components/middleware/Button
+    version: *wireless_power_components_version

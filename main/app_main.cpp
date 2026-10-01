@@ -171,8 +171,9 @@ extern "C" void app_main(void) {
         }
 
         // 按键手势先交给 UI 解析成动作，同时把“有用户活动”上报给电源管理。
-        const auto gesture = ButtonInput::poll(tick);
-        auto update = EmergencyUi::handle_input(EmergencyRemote::snapshot(), gesture, tick);
+        ButtonInput::Event event = ButtonInput::Event::None;
+        (void)ButtonInput::poll(event);
+        auto update = EmergencyUi::handle_input(EmergencyRemote::snapshot(), event, tick);
         if (update.activity) {
             PowerManager::note_activity(tick);
         }

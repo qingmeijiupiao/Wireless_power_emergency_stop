@@ -7,6 +7,14 @@ dependencies:
       path: components/bsp/ADC
       type: git
     version: 14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1
+  Button:
+    component_hash: 3a20b12e7f8f0d70203f042fcf637dba96658a50dffbcea4f9a035856565fb75
+    dependencies: []
+    source:
+      git: https://github.com/qingmeijiupiao/wireless-power-components.git
+      path: components/middleware/Button
+      type: git
+    version: 14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1
   HXC_NVS:
     component_hash: ace14a26b036a8a51f191146556bb91c5aa7af50e3baf6ee087fd133f9f23f7b
     dependencies: []
@@ -109,6 +117,7 @@ dependencies:
     version: 14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1
 direct_dependencies:
 - ADC
+- Button
 - HXC_NVS
 - Interp
 - battery_level
@@ -122,6 +131,6 @@ direct_dependencies:
 - idf
 - shell
 - wifi_manager
-manifest_hash: 5945984e50d8fd58f718887201eae29f16943694f6d87c32f48fe70d2b002ab4
+manifest_hash: f7c95355dd2b97f90614aade9e1ef9ced2ebe5cc5300c43e48466d3e32cbdef9
 target: esp32c3
 version: 3.0.0
