@@ -16,7 +16,7 @@ class StatusPage final : public Page {
         return true;
     }
     int page_key(const Model &model, const UiState &state) const override;
-    Update handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+    Update handle_button(const EmergencyRemote::Snapshot &remote, Gesture gesture, int64_t now_us,
                          UiState &state) override;
     void render(uint8_t *frame, const Model &model, const UiState &state) override;
 };

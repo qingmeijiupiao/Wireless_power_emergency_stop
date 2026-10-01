@@ -17,7 +17,7 @@ class UiManager {
     /** @brief 复位共享状态，并从 RTC 恢复深睡前的故障历史。 */
     void reset(int64_t now_us);
     /** @brief 处理一次按键事件并推进 UI 状态机。 */
-    Update handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us);
+    Update handle_input(const EmergencyRemote::Snapshot &remote, Gesture gesture, int64_t now_us);
     /** @brief 观察远端与电池状态，触发状态跳变记录与低电提示。 */
     bool observe_state(const Model &model);
     /** @brief 返回当前激活页面的页面键。 */

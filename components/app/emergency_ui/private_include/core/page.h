@@ -30,10 +30,10 @@ class Page {
      * @param state 可读写的共享 UI 状态
      * @return 需要业务层执行的动作
      */
-    virtual Update handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+    virtual Update handle_button(const EmergencyRemote::Snapshot &remote, Gesture gesture, int64_t now_us,
                                  UiState &state) {
         (void)remote;
-        (void)event;
+        (void)gesture;
         (void)now_us;
         (void)state;
         return {};

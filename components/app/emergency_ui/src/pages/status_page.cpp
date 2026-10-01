@@ -53,18 +53,18 @@ int StatusPage::page_key(const Model &model, const UiState &state) const {
     return page;
 }
 
-Update StatusPage::handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+Update StatusPage::handle_button(const EmergencyRemote::Snapshot &remote, Gesture event, int64_t now_us,
                                  UiState &state) {
     Update result;
     if (state.menu.view != UiPolicy::View::Home)
         return result;
     // 连接失败时主页短按改为请求重试，不再进入菜单。
-    if (remote.connection_failed && event == ButtonInput::Event::Short) {
+    if (remote.connection_failed && event == Gesture::Short) {
         result.retry = true;
         return result;
     }
     // 主页短按/长按进入菜单，从第 0 项开始。
-    if (event == ButtonInput::Event::Short || event == ButtonInput::Event::Long) {
+    if (event == Gesture::Short || event == Gesture::Long) {
         state.menu.view = UiPolicy::View::Menu;
         state.menu.selected = 0;
         state.menu.touched = now_us;

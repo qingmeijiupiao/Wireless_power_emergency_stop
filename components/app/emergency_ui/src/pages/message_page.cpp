@@ -13,12 +13,12 @@ int MessagePage::page_key(const Model &model, const UiState &state) const {
     (void)state;
     return 300 + static_cast<int>(UiPolicy::View::Message);
 }
-Update MessagePage::handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+Update MessagePage::handle_button(const EmergencyRemote::Snapshot &remote, Gesture event, int64_t now_us,
                                   UiState &state) {
     (void)remote;
     (void)now_us;
     // 消息页任意按键返回主页。
-    if (event != ButtonInput::Event::None)
+    if (event != Gesture::None)
         state.menu.home();
     return {};
 }

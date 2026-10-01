@@ -12,7 +12,7 @@ class MessagePage final : public Page {
     int priority() const override { return 30; }
     bool active(const EmergencyRemote::Snapshot &remote, const UiState &state) const override;
     int page_key(const Model &model, const UiState &state) const override;
-    Update handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+    Update handle_button(const EmergencyRemote::Snapshot &remote, Gesture gesture, int64_t now_us,
                          UiState &state) override;
     void render(uint8_t *frame, const Model &model, const UiState &state) override;
 };

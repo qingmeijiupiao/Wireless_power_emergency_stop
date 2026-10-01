@@ -20,11 +20,11 @@ constexpr char kEventTag[] = "ProductEvent";      // 产品事件日志标签
 RTC_DATA_ATTR uint32_t saved_fault = 0, saved_fault_check = 0;
 constexpr uint32_t kFaultMagic = 0x46540000;      // 故障页保存标志，低 8 位存放页面编号
 
-const char *event_name(ButtonInput::Event event) {
+const char *event_name(Gesture event) {
     switch (event) {
-    case ButtonInput::Event::Short:
+    case Gesture::Short:
         return "short";
-    case ButtonInput::Event::Long:
+    case Gesture::Long:
         return "long";
     default:
         return "none";
@@ -53,10 +53,10 @@ void UiManager::reset(int64_t now_us) {
     redraw_ = true;
 }
 
-Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us) {
+Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture event, int64_t now_us) {
     Update result;
     // 任何按键都视为用户活动：记录事件、阻止休眠并请求重绘。
-    if (event != ButtonInput::Event::None) {
+    if (event != Gesture::None) {
         DEVICE_EVENT_I(kEventTag, "BOOT %s view=%u item=%d", event_name(event),
                        static_cast<unsigned>(state_.menu.view), state_.menu.selected);
         result.activity = true;
@@ -89,13 +89,13 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, ButtonIn
                          remote.state == EmergencyRemote::State::STARTING;
     if (state_.controlling) {
         state_.menu.home();
-        event = ButtonInput::Event::None;
-    } else if (event != ButtonInput::Event::None) {
+        event = Gesture::None;
+    } else if (event != Gesture::None) {
         // 未确认故障时首次短按只用于确认并查看数据，不透传给菜单触发 ON 或进入隐藏页面。
         if (state_.menu.view == UiPolicy::View::Home && !state_.fault_acknowledged && state_.notice.page >= 0 &&
             (state_.current_fault >= 0 || state_.notice.holding(now_us)) &&
-            event == ButtonInput::Event::Short) {
-            event = ButtonInput::Event::None;
+            event == Gesture::Short) {
+            event = Gesture::None;
             ESP_LOGI(TAG, "FAULT_ACK show data; output unchanged");
         }
         state_.fault_acknowledged = true;

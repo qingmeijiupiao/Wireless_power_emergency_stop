@@ -14,10 +14,6 @@ jobs:
   build:
     name: ESP-IDF Build
     runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        shared_remote: ["OFF", "ON"]
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -30,7 +26,7 @@ jobs:
           esp_idf_version: v6.0
           target: esp32c3
           path: ./
-          command: idf.py -D ESTOP_VALIDATE_SHARED_REMOTE=${{ matrix.shared_remote }} build
+          command: idf.py build
 
       - name: Validate firmware layout
         run: python scripts/validate_firmware.py
@@ -38,7 +34,7 @@ jobs:
       - name: Upload emergency stop firmware
         uses: actions/upload-artifact@v4
         with:
-          name: emergency-stop-${{ matrix.shared_remote }}-${{ github.sha }}
+          name: emergency-stop-${{ github.sha }}
           if-no-files-found: error
           path: |
             build/Wireless_power_emergency_stop.bin

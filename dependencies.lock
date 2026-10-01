@@ -79,14 +79,6 @@ dependencies:
       path: components/middleware/espnow_link
       type: git
     version: 14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1
-  espnow_remote:
-    component_hash: bf03ab2c15c328e911abcb262629c66bd6779f314790ce9b4863831465ee368b
-    dependencies: []
-    source:
-      git: https://github.com/qingmeijiupiao/wireless-power-components.git
-      path: components/product/espnow_remote
-      type: git
-    version: 14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1
   espnow_service_remote:
     component_hash: a2b48210d2423b71e78fe10c5f03c9bbcf4f604309bde8354b988523f0597707
     dependencies: []
@@ -126,11 +118,10 @@ direct_dependencies:
 - circular_flash_buffer
 - diagnostic_log
 - espnow_link
-- espnow_remote
 - espnow_service_remote
 - idf
 - shell
 - wifi_manager
-manifest_hash: f7c95355dd2b97f90614aade9e1ef9ced2ebe5cc5300c43e48466d3e32cbdef9
+manifest_hash: 43e32594db86296d743b799b68113267e902e6adbce786357cdce884fa410f64
 target: esp32c3
 version: 3.0.0

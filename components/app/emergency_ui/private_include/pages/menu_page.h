@@ -12,18 +12,18 @@ class MenuPage final : public Page {
     int priority() const override { return 20; }
     bool active(const EmergencyRemote::Snapshot &remote, const UiState &state) const override;
     int page_key(const Model &model, const UiState &state) const override;
-    Update handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+    Update handle_button(const EmergencyRemote::Snapshot &remote, Gesture gesture, int64_t now_us,
                          UiState &state) override;
     void render(uint8_t *frame, const Model &model, const UiState &state) override;
 
   private:
     /** @brief 菜单列表：短按循环选择，长按按条目跳转或进入确认。 */
-    Update handle_list(ButtonInput::Event event, UiState &state);
+    Update handle_list(Gesture gesture, UiState &state);
     /** @brief 确认页：短按切换勾选，长按确认或取消；重新配对需要二次确认。 */
-    Update handle_confirm(ButtonInput::Event event, UiState &state);
+    Update handle_confirm(Gesture gesture, UiState &state);
     /** @brief 设备信息页：短按循环 4 个子页，长按返回主页。 */
-    Update handle_info(ButtonInput::Event event, UiState &state);
+    Update handle_info(Gesture gesture, UiState &state);
     /** @brief 休眠时长页：短按循环选择，长按保存并上报动作。 */
-    Update handle_sleep_time(ButtonInput::Event event, UiState &state);
+    Update handle_sleep_time(Gesture gesture, UiState &state);
 };
 } // namespace EmergencyUi

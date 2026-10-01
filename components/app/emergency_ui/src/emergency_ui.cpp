@@ -4,6 +4,7 @@
  */
 #include "emergency_ui.h"
 #include "battery_level.h"
+#include "core/button_input.h"
 #include "core/ui_manager.h"
 #include "product_ui.h"
 #include "runtime_settings.h"
@@ -23,13 +24,40 @@ unsigned failures = 0;                     // 累计写屏失败次数
 uint8_t frame[1024];                       // SH1106 单帧缓冲：128 列 × 8 页 = 1024 字节
 } // namespace
 
+void init_buttons() { Buttons::init(); }
+
 void init() {
     UiManager::instance().reset(esp_timer_get_time());
     restore();
 }
 
-Update handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t tick) {
-    return UiManager::instance().handle_input(remote, event, tick);
+Update handle_input(const EmergencyRemote::Snapshot &remote, int64_t tick) {
+    UiManager &ui = UiManager::instance();
+    Update result;
+    Gesture gesture = Gesture::None;
+    bool had_gesture = false;
+    // 消费本帧全部手势；合并活动、重试与最后一个有效动作。
+    while (Buttons::poll(gesture)) {
+        had_gesture = true;
+        const Update item = ui.handle_input(remote, gesture, tick);
+        result.activity = result.activity || item.activity;
+        result.retry = result.retry || item.retry;
+        if (item.action != Action::None) {
+            result.action = item.action;
+            result.sleep_choice = item.sleep_choice;
+        }
+    }
+    // 无手势时仍需周期调用，以推进故障提示与状态判定。
+    if (!had_gesture) {
+        const Update item = ui.handle_input(remote, Gesture::None, tick);
+        result.activity = result.activity || item.activity;
+        result.retry = result.retry || item.retry;
+        if (item.action != Action::None) {
+            result.action = item.action;
+            result.sleep_choice = item.sleep_choice;
+        }
+    }
+    return result;
 }
 
 bool observe_state(const Model &model) { return UiManager::instance().observe_state(model); }

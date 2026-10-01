@@ -3,7 +3,6 @@
  * @brief 急停控制器 UI 公开接口：屏幕初始化、按键输入处理、状态观察与渲染。
  */
 #pragma once
-#include "button_input.h"
 #include "emergency_remote.h"
 #include "sleep_policy.h"
 namespace EmergencyUi {
@@ -26,16 +25,17 @@ struct Model {
     bool always_on = false;                /**< 是否常亮模式 */
     int64_t now_us = 0;                    /**< 当前时间，微秒 */
 };
+/** @brief 初始化 GPIO3 按键与手势队列。 */
+void init_buttons();
 /** @brief 初始化屏幕、UI 管理器与故障历史。 */
 void init();
 /**
- * @brief 处理一次按键事件并推进 UI 状态机。
+ * @brief 消费按键手势并推进 UI 状态机，同时刷新故障提示与低电状态。
  * @param remote 处理开始时的远端快照
- * @param event 按键事件；Event::None 表示无按键的周期调用
  * @param tick 当前时间，微秒
  * @return 本次处理产生的动作与活动标记
  */
-Update handle_input(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t tick);
+Update handle_input(const EmergencyRemote::Snapshot &remote, int64_t tick);
 /**
  * @brief 观察远端与电池状态，触发状态跳变与低电提示。
  * @return true 表示发生了应计为用户活动的变化

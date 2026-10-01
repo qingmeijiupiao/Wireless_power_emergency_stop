@@ -12,7 +12,6 @@
 #include "blackbox.h"
 #include "blackbox_service.h"
 #include "boot_diagnostics.h"
-#include "button_input.h"
 #include "emergency_remote.h"
 #include "emergency_ui.h"
 #include "espnow_link.h"
@@ -91,7 +90,7 @@ constexpr PowerManager::DisplayHooks display_hooks{EmergencyUi::prepare_sleep, E
 extern "C" void app_main(void) {
     // 先初始化硬件与按键，使急停中断和按键采样尽早可用。
     Hardware::init(on_stop_fall);
-    ButtonInput::init();
+    EmergencyUi::init_buttons();
     // 等待硬件供电稳定后再启动 ADC 电池采样，避免上电瞬态导致误读。
     vTaskDelay(pdMS_TO_TICKS(100));
     ESP_ERROR_CHECK(BatteryVoltage::init());
@@ -171,9 +170,7 @@ extern "C" void app_main(void) {
         }
 
         // 按键手势先交给 UI 解析成动作，同时把“有用户活动”上报给电源管理。
-        ButtonInput::Event event = ButtonInput::Event::None;
-        (void)ButtonInput::poll(event);
-        auto update = EmergencyUi::handle_input(EmergencyRemote::snapshot(), event, tick);
+        auto update = EmergencyUi::handle_input(EmergencyRemote::snapshot(), tick);
         if (update.activity) {
             PowerManager::note_activity(tick);
         }

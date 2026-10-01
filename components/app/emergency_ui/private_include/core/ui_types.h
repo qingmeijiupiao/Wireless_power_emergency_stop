@@ -1,6 +1,6 @@
 /**
  * @file ui_types.h
- * @brief UI 核心轻量类型：屏幕标识与渲染模式。
+ * @brief UI 核心轻量类型：屏幕标识、渲染模式与逻辑按键手势。
  */
 #pragma once
 #include <cstdint>
@@ -16,5 +16,11 @@ enum class ScreenId : uint8_t {
 enum class RenderMode : uint8_t {
     Normal = 0, /**< 常规刷新 */
     Full,       /**< 页面切换或交互后的完整刷新 */
+};
+/** UI 关心的逻辑按键手势；按下/释放边沿不进入页面状态机。 */
+enum class Gesture : uint8_t {
+    None = 0, /**< 无手势 */
+    Short,    /**< 短按 */
+    Long,     /**< 长按 */
 };
 } // namespace EmergencyUi

@@ -1,27 +1,28 @@
 /**
  * @file button_input.cpp
- * @brief BOOT 按键输入实现：绑定公共 Button 回调，只把短按/长按手势写入事件队列。
+ * @brief UI 内部按键适配实现：绑定公共 Button 回调，只把短按/长按手势写入队列。
  */
-#include "button_input.h"
+#include "core/button_input.h"
 #include "Button.h"
 #include "hardware.h"
 #include "esp_log.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
-namespace ButtonInput {
+namespace EmergencyUi {
+namespace Buttons {
 namespace {
-constexpr char TAG[] = "ButtonInput";
-QueueHandle_t events = nullptr; // 按键事件队列，跨任务传递 Button 回调产生的事件
+constexpr char TAG[] = "EmergencyUi";
+QueueHandle_t events = nullptr; // 手势队列，跨任务传递 Button 回调产生的事件
 Button button;                  // 公共按键驱动实例，运行在独立扫描任务中
 // 唤醒时 BOOT 可能仍被按住，抑制到释放为止，避免把唤醒按压识别为手势。
 bool suppress = false;
-void post(Event event) {
+void post(Gesture gesture) {
     if (suppress || events == nullptr)
         return;
-    (void)xQueueSend(events, &event, 0);
+    (void)xQueueSend(events, &gesture, 0);
 }
-void on_short() { post(Event::Short); }
-void on_long() { post(Event::Long); }
+void on_short() { post(Gesture::Short); }
+void on_long() { post(Gesture::Long); }
 // 释放回调只用于解除唤醒抑制，不产生 UI 事件，避免长按松手被当作额外手势。
 void on_release() {
     if (suppress)
@@ -29,9 +30,9 @@ void on_release() {
 }
 } // namespace
 void init() {
-    events = xQueueCreate(8, sizeof(Event));
+    events = xQueueCreate(8, sizeof(Gesture));
     if (events == nullptr) {
-        ESP_LOGE(TAG, "event queue create failed");
+        ESP_LOGE(TAG, "button queue create failed");
         return;
     }
     suppress = Hardware::button_pressed();
@@ -42,13 +43,14 @@ void init() {
     if (err != ESP_OK)
         ESP_LOGE(TAG, "button setup failed: %s", esp_err_to_name(err));
 }
-bool poll(Event& event) {
+bool poll(Gesture &gesture) {
     if (events == nullptr)
         return false;
-    Event incoming = Event::None;
+    Gesture incoming = Gesture::None;
     if (xQueueReceive(events, &incoming, 0) != pdTRUE)
         return false;
-    event = incoming;
+    gesture = incoming;
     return true;
 }
-} // namespace ButtonInput
+} // namespace Buttons
+} // namespace EmergencyUi

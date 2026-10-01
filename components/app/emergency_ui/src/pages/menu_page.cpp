@@ -31,7 +31,7 @@ int MenuPage::page_key(const Model &model, const UiState &state) const {
     return 300 + static_cast<int>(state.menu.view);
 }
 
-Update MenuPage::handle_button(const EmergencyRemote::Snapshot &remote, ButtonInput::Event event, int64_t now_us,
+Update MenuPage::handle_button(const EmergencyRemote::Snapshot &remote, Gesture event, int64_t now_us,
                                UiState &state) {
     (void)remote;
     UiPolicy::Menu &menu = state.menu;
@@ -40,7 +40,7 @@ Update MenuPage::handle_button(const EmergencyRemote::Snapshot &remote, ButtonIn
         menu.home();
         return {};
     }
-    if (event == ButtonInput::Event::None)
+    if (event == Gesture::None)
         return {};
     menu.touched = now_us;
     switch (menu.view) {
@@ -58,10 +58,10 @@ Update MenuPage::handle_button(const EmergencyRemote::Snapshot &remote, ButtonIn
     }
 }
 
-Update MenuPage::handle_list(ButtonInput::Event event, UiState &state) {
+Update MenuPage::handle_list(Gesture event, UiState &state) {
     UiPolicy::Menu &menu = state.menu;
     // 短按循环 7 个条目；长按按条目分派。
-    if (event == ButtonInput::Event::Short) {
+    if (event == Gesture::Short) {
         menu.selected = (menu.selected + 1) % 7;
         return {};
     }
@@ -90,9 +90,9 @@ Update MenuPage::handle_list(ButtonInput::Event event, UiState &state) {
     return {};
 }
 
-Update MenuPage::handle_confirm(ButtonInput::Event event, UiState &state) {
+Update MenuPage::handle_confirm(Gesture event, UiState &state) {
     UiPolicy::Menu &menu = state.menu;
-    if (event == ButtonInput::Event::Short) {
+    if (event == Gesture::Short) {
         menu.confirm = !menu.confirm;
         return {};
     }
@@ -114,20 +114,20 @@ Update MenuPage::handle_confirm(ButtonInput::Event event, UiState &state) {
     return result;
 }
 
-Update MenuPage::handle_info(ButtonInput::Event event, UiState &state) {
+Update MenuPage::handle_info(Gesture event, UiState &state) {
     UiPolicy::Menu &menu = state.menu;
     // 信息页：短按循环 4 个子页，长按返回主页。
-    if (event == ButtonInput::Event::Short)
+    if (event == Gesture::Short)
         menu.info_page = (menu.info_page + 1) % 4;
     else
         menu.home();
     return {};
 }
 
-Update MenuPage::handle_sleep_time(ButtonInput::Event event, UiState &state) {
+Update MenuPage::handle_sleep_time(Gesture event, UiState &state) {
     UiPolicy::Menu &menu = state.menu;
     // 休眠时长页：短按循环选择项，长按确认并上报动作。
-    if (event == ButtonInput::Event::Short) {
+    if (event == Gesture::Short) {
         menu.sleep_choice = (menu.sleep_choice + 1) % 4;
         return {};
     }

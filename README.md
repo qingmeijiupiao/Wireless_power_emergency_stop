@@ -67,7 +67,7 @@ flowchart TD
 ```mermaid
 flowchart TD
     Start["app_main"] --> HW["hardware：配置 GPIO、安装急停 ISR"]
-    HW --> Button["button_input：初始化公共 Button 与事件队列"]
+    HW --> Button["emergency_ui 初始化公共 Button 与手势队列"]
     Button --> Battery["battery_voltage：初始化并完成一次采样"]
     Battery --> Storage["HXC_NVS / runtime_settings / blackbox_service"]
     Storage --> Remote["emergency_remote：启动控制工作线程"]
@@ -88,10 +88,9 @@ components/
   app/                        与本产品行为直接相关的应用组件
     battery_voltage/          电池电压采样与校准
     boot_diagnostics/         固件、复位/唤醒、配置和电池启动快照
-    button_input/             公共 Button 适配与手势事件队列
     emergency_remote/         急停事务、关闭重试、信道恢复和数据快照
-    emergency_ui/             显示驱动、页面框架与菜单
-      core/                   Page 抽象、UI 状态与 UiManager
+    emergency_ui/             显示驱动、按键适配、页面框架与菜单
+      core/                   Page 抽象、UI 状态、按键适配与 UiManager
       pages/                  状态屏、菜单屏、消息屏
     power_manager/            静置计时、倒计时、休眠安全检查及进入/恢复
     runtime_settings/         参数及常亮模式的 HXC_NVS 持久化
@@ -146,9 +145,9 @@ flowchart LR
 - `MenuPage`：菜单列表、条目确认、设备信息和休眠时长四个视图。
 - `MessagePage`：一次性消息页。
 
-`button_input` 基于公共 `Button` 组件在 GPIO3 上识别短按与长按，并投递到事件队列由主循环
-消费；唤醒时若按键仍被按住，会抑制到释放为止。按键阈值采用公共组件固定值（消抖 5 ms、
-长按 1000 ms、超长按 3000 ms、双击窗口 250 ms），本工程只使用短按与长按。
+`emergency_ui` 内部的按键适配基于公共 `Button` 组件，在 GPIO3 上识别短按与长按并投递到手势
+队列，由主循环消费；唤醒时若按键仍被按住，会抑制到释放为止。按键阈值采用公共组件固定值
+（消抖 5 ms、长按 1000 ms、超长按 3000 ms、双击窗口 250 ms），本工程只使用短按与长按。
 
 ### 深度休眠
 
@@ -300,10 +299,10 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 - 标签发布由 CI 使用 `PATCH=0` 构建，例如 `v0.2.0`；
 - 编译时间统一按 UTC+8 写入固件。
 
-推送 `main`、提交 PR 或手动运行会触发 CI，分别编译默认模式和共享遥控组件检查模式，并
-验证合并固件布局、上传 Actions artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签
-触发发布构建，生成 APP、merged 和 SHA256SUMS，发布到本私有仓库的 GitHub prerelease。
-本工程没有公共 CDN、Launchpad 或 firmware-dist 分发，需登录并获得仓库访问权限才能下载。
+推送 `main`、提交 PR 或手动运行会触发 CI，编译固件、验证合并固件布局并上传 Actions
+artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged 和
+SHA256SUMS，发布到本私有仓库的 GitHub prerelease。本工程没有公共 CDN、Launchpad 或
+firmware-dist 分发，需登录并获得仓库访问权限才能下载。
 
 ## 组件文档
 
@@ -313,7 +312,6 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 | 电源管理 | [power_manager](components/app/power_manager/README.md) |
 | Shell 命令 | [shell_command](components/app/shell_command/README.md) |
 | 公共按键 | [Button](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/Button/README.md) |
-| 遥控端应用 | [espnow_remote](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/product/espnow_remote/README.md) |
 | 产品业务协议 | [espnow_service_remote](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/product/espnow_service_remote/README.md) |
 | ESP-NOW 链路 | [espnow_link](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/espnow_link/README.md) |
 | 电量估算 | [battery_level](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/battery_level/README.md) |
@@ -322,16 +320,8 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 
 ## 共用组件
 
-`battery_level`、`blackbox_service`、`espnow_remote`、`espnow_service_remote`、`espnow_link`、
-`Button` 等遥控与交互组件，以及 `HXC_NVS`、`ADC`、`wifi_manager`、`shell`、
-`circular_flash_buffer`、`Interp`、`blackbox`、`diagnostic_log` 等通用组件统一固定到
-`14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1`，由 Component Manager 自动下载，不依赖本地相邻
-目录。`main/idf_component.yml` 使用 YAML 锚点集中定义仓库地址与版本，升级时只需修改锚点
-处一处。`PWM` 未被本工程使用，已移除以减少下载。
-
-```powershell
-python scripts/idf_local.py -D ESTOP_VALIDATE_SHARED_REMOTE=ON build
-python scripts/idf_local.py -D ESTOP_VALIDATE_SHARED_REMOTE=OFF build
-```
-
-第一条额外编译原按钮遥控组件，第二条恢复默认配置；两种配置均使用急停无线联调入口。
+`battery_level`、`blackbox_service`、`espnow_service_remote`、`espnow_link`、`Button` 等遥控与
+交互组件，以及 `HXC_NVS`、`ADC`、`wifi_manager`、`shell`、`circular_flash_buffer`、`Interp`、
+`blackbox`、`diagnostic_log` 等通用组件统一固定到 `14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1`，
+由 Component Manager 自动下载，不依赖本地相邻目录。`main/idf_component.yml` 使用 YAML 锚点
+集中定义仓库地址与版本，升级时只需修改锚点处一处。
