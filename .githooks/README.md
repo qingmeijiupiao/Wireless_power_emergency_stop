@@ -26,7 +26,7 @@ git config --unset core.hooksPath
 ```text
 FEAT：恢复网页趋势曲线并改用内置 Canvas 渲染
 
-WHY：Bring-up 阶段为去除公网依赖移除了在线 Chart.js。
+WHY：硬件验证阶段为去除公网依赖移除了在线 Chart.js。
 
 WHAT：用页面内置 Canvas 渲染器实现四条趋势曲线。
 

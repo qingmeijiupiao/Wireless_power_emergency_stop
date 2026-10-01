@@ -829,15 +829,15 @@ CONFIG_PARTITION_TABLE_MD5=y
 # end of Partition Table
 
 #
-# Emergency stop bring-up
+# Emergency stop controller
 #
 # default:
-CONFIG_ESTOP_OLED_SDA=21
+CONFIG_ESTOP_OLED_SDA=1
 # default:
-CONFIG_ESTOP_OLED_SCL=20
+CONFIG_ESTOP_OLED_SCL=2
 # default:
 CONFIG_ESTOP_OLED_COLUMN_OFFSET=2
-# end of Emergency stop bring-up
+# end of Emergency stop controller
 
 #
 # Compiler options

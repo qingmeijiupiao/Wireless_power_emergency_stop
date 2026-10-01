@@ -1,12 +1,12 @@
 option(ESTOP_VALIDATE_SHARED_REMOTE "Compile migrated remote components without starting radio" OFF)
-set(bringup_dependencies screen_bringup)
+set(app_dependencies emergency_ui)
 if(ESTOP_VALIDATE_SHARED_REMOTE)
-    list(APPEND bringup_dependencies espnow_remote battery_level blackbox_service)
+    list(APPEND app_dependencies espnow_remote battery_level blackbox_service)
 endif()
 idf_component_register(
     SRCS "app_main.cpp"
     INCLUDE_DIRS "."
-    REQUIRES ${bringup_dependencies}
+    REQUIRES ${app_dependencies}
 )
 
 set(SCRIPT_DIR "${CMAKE_SOURCE_DIR}/scripts")

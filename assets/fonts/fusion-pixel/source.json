@@ -1,0 +1,16 @@
+{
+  "project": "https://github.com/TakWolf/fusion-pixel-font",
+  "release": "2026.09.25",
+  "fonts": [
+    {
+      "file": "fusion-pixel-10px-monospaced-zh_hans.otf",
+      "download": "https://github.com/TakWolf/fusion-pixel-font/releases/download/2026.09.25/fusion-pixel-font-10px-monospaced-otf-v2026.09.25.zip",
+      "sha256": "fcd116c19cad0dff7aebb7b881006d2a073388c2094a01ee3b4288fc5d72e857"
+    },
+    {
+      "file": "fusion-pixel-12px-monospaced-zh_hans.otf",
+      "download": "https://github.com/TakWolf/fusion-pixel-font/releases/download/2026.09.25/fusion-pixel-font-12px-monospaced-otf-v2026.09.25.zip",
+      "sha256": "58836813b4e32027c41d87f598cb2ba7761c73227677f41de13f58f9d870e76e"
+    }
+  ]
+}

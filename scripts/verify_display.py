@@ -1,4 +1,4 @@
-"""COM3 bring-up 页传输检查；不代表物理屏幕外观已经通过验收。"""
+"""Diagnostic page transfer check; physical STOP must be released during this test."""
 import argparse
 from pathlib import Path
 import time
@@ -6,17 +6,22 @@ import serial
 import re
 
 parser = argparse.ArgumentParser()
-parser.add_argument('--port', default='COM3')
+parser.add_argument('--port', default='COM17')
 parser.add_argument('--rounds', type=int, default=1)
 args = parser.parse_args()
 if args.rounds < 1:
     parser.error('--rounds must be positive')
 log = []
 baseline = None
-with serial.Serial(args.port, 115200, timeout=0.2) as device:
+device = serial.Serial()
+device.port = args.port
+device.baudrate = 115200
+device.timeout = 0.2
+device.dtr = False
+device.rts = False
+with device:
     # 只切换显示页，不发送无线控制命令。
-    device.write(b'p')
-    for command, page in ([(str(n).encode(), n) for n in range(10)] + [(b'm', 10), (b'l', 11), (b't', 12)]) * args.rounds:
+    for command, page in ([(str(n).encode(), 200 + n) for n in range(10)] + [(b't', 212)]) * args.rounds:
         device.reset_input_buffer()
         device.write(command)
         received = ''
@@ -35,6 +40,7 @@ with serial.Serial(args.port, 115200, timeout=0.2) as device:
             raise RuntimeError(f'Failure count increased: {received}')
         print(f'PASS page={page}')
     device.write(b'm')
-out = Path(__file__).resolve().parents[1]/'docs/serial-verification.log'
+out = Path(__file__).resolve().parents[1]/'tmp/serial-verification.log'
+out.parent.mkdir(parents=True, exist_ok=True)
 out.write_text('\n'.join(log), encoding='utf-8')
-print(f'All {13 * args.rounds} frames transmitted; failures baseline/final={baseline}/{failures}; meter page selected. Log: {out}')
+print(f'All {11 * args.rounds} frames transmitted; failures baseline/final={baseline}/{failures}; live page selected. Log: {out}')

@@ -1,2 +1,2 @@
-#include "screen_bringup.h"
-extern "C" void app_main(void) { ScreenBringup::run(); }
+#include "emergency_ui.h"
+extern "C" void app_main(void) { EmergencyUi::run(); }

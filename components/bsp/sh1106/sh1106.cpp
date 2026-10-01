@@ -3,8 +3,17 @@
 #include <initializer_list>
 
 Sh1106::~Sh1106() {
+    shutdown();
+}
+
+void Sh1106::shutdown() {
+    if (device_) {
+        const uint8_t off[] = {0x00, 0xae};
+        i2c_master_transmit(device_, off, sizeof(off), 100);
+    }
     if (device_) i2c_master_bus_rm_device(device_);
     if (bus_) i2c_del_master_bus(bus_);
+    device_ = nullptr; bus_ = nullptr; address_ = 0;
 }
 
 esp_err_t Sh1106::init(int sda, int scl, uint8_t offset) {

@@ -24,6 +24,13 @@ jobs:
         with:
           submodules: recursive
 
+      - name: Verify button and sleep policy
+        run: |
+          g++ -std=c++17 tests/runtime_policy_test.cpp -o /tmp/runtime-policy-test
+          /tmp/runtime-policy-test
+          g++ -std=c++17 -I tests/stubs -I components/app/emergency_remote/include tests/product_ui_test.cpp -o /tmp/product-ui-test
+          /tmp/product-ui-test
+
       - name: Build firmware
         uses: espressif/esp-idf-ci-action@v1
         with:
@@ -35,7 +42,7 @@ jobs:
       - name: Validate firmware layout
         run: python scripts/validate_firmware.py
 
-      - name: Upload bring-up firmware
+      - name: Upload emergency stop firmware
         uses: actions/upload-artifact@v4
         with:
           name: emergency-stop-${{ matrix.shared_remote }}-${{ github.sha }}

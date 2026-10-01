@@ -8,6 +8,7 @@ class Sh1106 {
 public:
     esp_err_t init(int sda, int scl, uint8_t offset = 2);
     esp_err_t write_frame(const uint8_t* frame, size_t size);
+    void shutdown();
     uint8_t address() const { return address_; }
     ~Sh1106();
     Sh1106() = default;
