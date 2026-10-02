@@ -1,8 +1,6 @@
 # Wireless Power Emergency Stop
 
-`Wireless_power_emergency_stop` 是一个基于 ESP-IDF 的 ESP32-C3 无线急停开关固件，
-与 [`Wireless_power_meter_pro_v2`](https://github.com/qingmeijiupiao/Wireless_power_meter_pro_v2)
-无线联调，并兼容 `Wireless_power_meter_lite` 的原有协议。
+`Wireless_power_emergency_stop` 是一个基于 ESP-IDF 的 ESP32-C3 无线急停开关，
 
 它的核心行为不是“发一个无线包”，而是一笔完整的控制事务：急停触点闭合后优先关闭并
 持续重试，触点稳定释放后先取得关闭业务确认才尝试开启，同时维护配对、信道恢复、真实
@@ -14,7 +12,7 @@
 
 ### 硬件开源链接
 
-待补充。
+[低功耗 ESP-NOW 远程急停按钮（立创开源硬件平台）](https://oshwhub.com/qingmeijiupiao/project_ztiyzlcl)
 
 ## 主要功能
 
