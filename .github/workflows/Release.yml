@@ -87,19 +87,16 @@ jobs:
           if any(value != 0xFF for value in merged[nvs_start:nvs_end]):
               raise SystemExit("merged image NVS range 0x9000-0xEFFF is not blank")
 
-      - name: Create private prerelease
+      - name: Create release
         uses: softprops/action-gh-release@v2
         with:
-          prerelease: true
           fail_on_unmatched_files: true
           generate_release_notes: true
           body: |
             Emergency Stop firmware with Pro V2 wireless integration.
             Includes live measurements, OFF retries, and optional detailed refusal feedback.
-            Deep sleep and Lite hardware validation remain pending.
             APP: flash at 0x10000, preserving NVS when layout is unchanged.
             Merged: flash at 0x0; clears NVS pairing/calibration data.
-            Download requires access to this private repository.
           files: |
             ${{ steps.artifacts.outputs.app_name }}
             ${{ steps.artifacts.outputs.merged_name }}

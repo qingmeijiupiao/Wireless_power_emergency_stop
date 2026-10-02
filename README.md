@@ -12,6 +12,10 @@
 > 本 README 主要介绍软件架构、运行流程和二次开发入口。具体引脚、电气连接和板级
 > 注意事项属于 BSP 与对应组件的实现细节，不在根目录文档中展开。
 
+### 硬件开源链接
+
+待补充。
+
 ## 主要功能
 
 - **急停优先关闭**：急停触点下降沿在 ISR 中锁存，控制工作线程独立于 UI 传输，立即
@@ -185,12 +189,9 @@ GPIO5 触点变化和 GPIO4 插电均可唤醒。
 | USB 供电检测 | GPIO4 |
 | 电池 ADC / 分压下端 | GPIO0 / GPIO10，采样期间将 GPIO10 拉低 |
 | BOOT 菜单 / 唤醒 | GPIO3，同时连接 GPIO9 |
-| 急停板原生 USB | COM17 |
-| Pro V2 原生 USB | COM16 |
 
-OLED 使用 I2C 400 kHz，自动探测 0x3C/0x3D，列偏移 2。原 COM3 核心板接线 SDA=21 / SCL=20
-已退出默认配置，可在 menuconfig 中调整 I2C 引脚。电池分压路径只在采样窗口内导通，其余
-时间保持高阻以降低静态功耗。
+OLED 使用 I2C 400 kHz，自动探测 0x3C/0x3D，列偏移 2，SDA/SCL 可在 menuconfig 中调整。
+电池分压路径只在采样窗口内导通，其余时间保持高阻以降低静态功耗。
 
 ## 配对与无线联调
 
@@ -265,7 +266,7 @@ idf.py build
 ```powershell
 python scripts/idf_local.py build
 python scripts/validate_firmware.py
-python scripts/verify_display.py --port COM17
+python scripts/verify_display.py --port <PORT>
 ```
 
 构建完成后生成：
@@ -278,7 +279,7 @@ python scripts/verify_display.py --port COM17
 仅更新应用程序（Bootloader 与分区表未变化时），不覆盖 NVS，配对与校准保留：
 
 ```powershell
-idf.py -p COM17 flash
+idf.py -p <PORT> flash
 ```
 
 完整烧录适用于首次安装、故障恢复或分区布局变化：
@@ -301,8 +302,7 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 
 推送 `main`、提交 PR 或手动运行会触发 CI，编译固件、验证合并固件布局并上传 Actions
 artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged 和
-SHA256SUMS，发布到本私有仓库的 GitHub prerelease。本工程没有公共 CDN、Launchpad 或
-firmware-dist 分发，需登录并获得仓库访问权限才能下载。
+SHA256SUMS，发布到本仓库的 GitHub Release。
 
 ## 组件文档
 
@@ -311,17 +311,18 @@ firmware-dist 分发，需登录并获得仓库访问权限才能下载。
 | 电池采样 | [battery_voltage](components/app/battery_voltage/README.md) |
 | 电源管理 | [power_manager](components/app/power_manager/README.md) |
 | Shell 命令 | [shell_command](components/app/shell_command/README.md) |
-| 公共按键 | [Button](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/Button/README.md) |
-| 产品业务协议 | [espnow_service_remote](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/product/espnow_service_remote/README.md) |
-| ESP-NOW 链路 | [espnow_link](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/espnow_link/README.md) |
-| 电量估算 | [battery_level](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/battery_level/README.md) |
-| 黑匣子服务 | [blackbox_service](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/blackbox_service/README.md) |
-| 黑匣子存储 | [blackbox](https://github.com/qingmeijiupiao/wireless-power-components/blob/14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1/components/middleware/blackbox/README.md) |
+| 公共按键 | [Button](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/middleware/Button/README.md) |
+| 产品业务协议 | [espnow_service_remote](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/product/espnow_service_remote/README.md) |
+| 协议编解码 | [espnow_service_proto](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/product/espnow_service_proto/README.md) |
+| ESP-NOW 链路 | [espnow_link](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/middleware/espnow_link/README.md) |
+| 电量估算 | [battery_level](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/middleware/battery_level/README.md) |
+| 黑匣子服务 | [blackbox_service](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/middleware/blackbox_service/README.md) |
+| 黑匣子存储 | [blackbox](https://github.com/qingmeijiupiao/wireless-power-components/blob/b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4/components/middleware/blackbox/README.md) |
 
 ## 共用组件
 
 `battery_level`、`blackbox_service`、`espnow_service_remote`、`espnow_link`、`Button` 等遥控与
 交互组件，以及 `HXC_NVS`、`ADC`、`wifi_manager`、`shell`、`circular_flash_buffer`、`Interp`、
-`blackbox`、`diagnostic_log` 等通用组件统一固定到 `14662fc40ddc8ed5de18a347ef27d42f2ebdbbe1`，
+`blackbox`、`diagnostic_log` 等通用组件统一固定到 `b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4`，
 由 Component Manager 自动下载，不依赖本地相邻目录。`main/idf_component.yml` 使用 YAML 锚点
 集中定义仓库地址与版本，升级时只需修改锚点处一处。
