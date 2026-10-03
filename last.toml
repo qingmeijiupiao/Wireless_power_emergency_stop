@@ -1,0 +1,17 @@
+schema_version = 1
+version = "0.4.0"
+published_at = "2026-10-03T04:26:42Z"
+
+[firmware.app]
+filename = "Wireless_power_emergency_stop_app_v0.4.0.bin"
+offset = "0x10000"
+size = 988544
+sha256 = "a7316386cb9685ef06342c55516fec30b312be960612f1150e4ce0c171a5411f"
+url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@f60207fb04a63c80ddd70b186a2feaa9d6cc54a6/firmware/v0.4.0/Wireless_power_emergency_stop_app_v0.4.0.bin"
+
+[firmware.merged]
+filename = "Wireless_power_emergency_stop_merged_v0.4.0.bin"
+offset = "0x0"
+size = 1054080
+sha256 = "77947e7ca41f22b6ef3f939df129a0d1443420b33d549af03970b7553d1ce2bd"
+url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@f60207fb04a63c80ddd70b186a2feaa9d6cc54a6/firmware/v0.4.0/Wireless_power_emergency_stop_merged_v0.4.0.bin"

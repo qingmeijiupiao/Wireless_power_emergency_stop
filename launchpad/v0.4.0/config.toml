@@ -1,0 +1,22 @@
+esp_toml_version = 1.0
+firmware_images_url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@f60207fb04a63c80ddd70b186a2feaa9d6cc54a6/firmware/v0.4.0/"
+supported_apps = ["Wireless_power_emergency_stop_app", "Wireless_power_emergency_stop_merged"]
+config_readme_url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/launchpad/README.md"
+
+["Wireless_power_emergency_stop_app"]
+image.esp32c3 = "Wireless_power_emergency_stop_app_v0.4.0.bin"
+offset = "0x10000"
+description = "APP更新：只写入APP分区，保留NVS配对、校准和业务配置。仅适用于bootloader和分区表未变化的常规升级。"
+android_app_url = ""
+ios_app_url = ""
+chipsets = ["esp32c3"]
+readme.text = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/launchpad/README.md"
+
+["Wireless_power_emergency_stop_merged"]
+image.esp32c3 = "Wireless_power_emergency_stop_merged_v0.4.0.bin"
+offset = "0x0"
+description = "完整烧录：包含bootloader、分区表和APP，用于首次烧录或恢复。会清除NVS配对、校准和业务配置。"
+android_app_url = ""
+ios_app_url = ""
+chipsets = ["esp32c3"]
+readme.text = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/launchpad/README.md"
