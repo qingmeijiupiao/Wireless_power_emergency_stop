@@ -20,7 +20,7 @@ set(EXTRA_COMPONENT_DIRS
 # MAJOR.MINOR 由开发者手工维护。PATCH=99 标识本地构建；
 # 发布流水线会将其覆盖为 PATCH=0，以区分正式固件。
 set(VERSION_MAJOR 0 CACHE STRING "Major version")
-set(VERSION_MINOR 3 CACHE STRING "Minor version")
+set(VERSION_MINOR 4 CACHE STRING "Minor version")
 set(VERSION_PATCH 99 CACHE STRING "Patch version (99=local, 0=release)")
 set(PROJECT_VER "v${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 

@@ -87,17 +87,209 @@ jobs:
           if any(value != 0xFF for value in merged[nvs_start:nvs_end]):
               raise SystemExit("merged image NVS range 0x9000-0xEFFF is not blank")
 
-      - name: Create release
+      - name: Checkout firmware distribution branch
+        id: dist_checkout
+        continue-on-error: true
+        uses: actions/checkout@v4
+        with:
+          ref: firmware-dist
+          path: firmware-dist
+          fetch-depth: 1
+
+      - name: Initialize firmware distribution branch
+        if: steps.dist_checkout.outcome == 'failure'
+        continue-on-error: true
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p firmware-dist
+          if [[ ! -d firmware-dist/.git ]]; then
+            git -C firmware-dist init
+            git -C firmware-dist remote add origin "https://x-access-token:${GITHUB_TOKEN}@github.com/${GITHUB_REPOSITORY}.git"
+          fi
+          git -C firmware-dist checkout --orphan firmware-dist
+          git -C firmware-dist rm -rf . 2>/dev/null || true
+          git -C firmware-dist clean -fdx
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Publish firmware distribution
+        id: distribution
+        continue-on-error: true
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.full }}
+          APP_NAME: ${{ steps.artifacts.outputs.app_name }}
+          MERGED_NAME: ${{ steps.artifacts.outputs.merged_name }}
+        run: |
+          set -euo pipefail
+          DIST_DIR="firmware-dist/firmware/v${VERSION}"
+          LAUNCHPAD_DIR="firmware-dist/launchpad/v${VERSION}"
+          mkdir -p "${DIST_DIR}" "${LAUNCHPAD_DIR}" firmware-dist/latest
+          cp "${APP_NAME}" "${DIST_DIR}/${APP_NAME}"
+          cp "${MERGED_NAME}" "${DIST_DIR}/${MERGED_NAME}"
+          cp SHA256SUMS "${DIST_DIR}/SHA256SUMS"
+          cp "${APP_NAME}" firmware-dist/latest/app.bin
+          cp "${MERGED_NAME}" firmware-dist/latest/merged.bin
+
+          git -C firmware-dist config user.name "github-actions[bot]"
+          git -C firmware-dist config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git -C firmware-dist add -f "firmware/v${VERSION}" latest/app.bin latest/merged.bin
+          if ! git -C firmware-dist diff --cached --quiet; then
+            git -C firmware-dist commit -m "Publish firmware v${VERSION}"
+          fi
+          ARTIFACT_COMMIT="$(git -C firmware-dist rev-parse HEAD)"
+          CDN_ROOT="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${ARTIFACT_COMMIT}"
+          FIRMWARE_ROOT="${CDN_ROOT}/firmware/v${VERSION}/"
+
+          cat > "${LAUNCHPAD_DIR}/README.md" <<EOF
+          # Wireless Power Emergency Stop v${VERSION}
+
+          ## APP update
+
+          Writes only the application partition at \`0x10000\`. It preserves NVS pairing,
+          calibration and business settings. Use it only when the bootloader and partition
+          layout have not changed.
+
+          ## Merged firmware
+
+          Writes a complete image at \`0x0\`, including bootloader, partition table and APP.
+          Use it for first-time installation, recovery, or partition/bootloader changes.
+          The image blanks NVS at \`0x9000-0xEFFF\`, so pairing and calibration data are lost.
+
+          Neither image provides OTA. Both are flashed manually over USB/serial.
+          EOF
+
+          cat > "${LAUNCHPAD_DIR}/config.toml" <<EOF
+          esp_toml_version = 1.0
+          firmware_images_url = "${FIRMWARE_ROOT}"
+          supported_apps = ["Wireless_power_emergency_stop_app", "Wireless_power_emergency_stop_merged"]
+          config_readme_url = "https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@firmware-dist/launchpad/README.md"
+
+          ["Wireless_power_emergency_stop_app"]
+          image.esp32c3 = "${APP_NAME}"
+          offset = "0x10000"
+          description = "APP更新：只写入APP分区，保留NVS配对、校准和业务配置。仅适用于bootloader和分区表未变化的常规升级。"
+          android_app_url = ""
+          ios_app_url = ""
+          chipsets = ["esp32c3"]
+          readme.text = "https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@firmware-dist/launchpad/README.md"
+
+          ["Wireless_power_emergency_stop_merged"]
+          image.esp32c3 = "${MERGED_NAME}"
+          offset = "0x0"
+          description = "完整烧录：包含bootloader、分区表和APP，用于首次烧录或恢复。会清除NVS配对、校准和业务配置。"
+          android_app_url = ""
+          ios_app_url = ""
+          chipsets = ["esp32c3"]
+          readme.text = "https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@firmware-dist/launchpad/README.md"
+          EOF
+
+          APP_SIZE="$(stat -c%s "${DIST_DIR}/${APP_NAME}")"
+          MERGED_SIZE="$(stat -c%s "${DIST_DIR}/${MERGED_NAME}")"
+          APP_SHA256="$(sha256sum "${DIST_DIR}/${APP_NAME}" | cut -d' ' -f1)"
+          MERGED_SHA256="$(sha256sum "${DIST_DIR}/${MERGED_NAME}" | cut -d' ' -f1)"
+          cat > firmware-dist/last.toml <<EOF
+          schema_version = 1
+          version = "${VERSION}"
+          published_at = "$(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+
+          [firmware.app]
+          filename = "${APP_NAME}"
+          offset = "0x10000"
+          size = ${APP_SIZE}
+          sha256 = "${APP_SHA256}"
+          url = "${FIRMWARE_ROOT}${APP_NAME}"
+
+          [firmware.merged]
+          filename = "${MERGED_NAME}"
+          offset = "0x0"
+          size = ${MERGED_SIZE}
+          sha256 = "${MERGED_SHA256}"
+          url = "${FIRMWARE_ROOT}${MERGED_NAME}"
+          EOF
+
+          cp "${LAUNCHPAD_DIR}/config.toml" firmware-dist/launchpad/latest.toml
+          cp "${LAUNCHPAD_DIR}/README.md" firmware-dist/launchpad/README.md
+
+          grep -q 'offset = "0x10000"' firmware-dist/launchpad/latest.toml
+          grep -q 'offset = "0x0"' firmware-dist/launchpad/latest.toml
+
+          git -C firmware-dist add "launchpad/v${VERSION}" launchpad/latest.toml launchpad/README.md last.toml
+          if ! git -C firmware-dist diff --cached --quiet; then
+            git -C firmware-dist commit -m "Update release metadata for v${VERSION}"
+          fi
+          METADATA_COMMIT="$(git -C firmware-dist rev-parse HEAD)"
+          git -C firmware-dist push origin HEAD:firmware-dist
+
+          CONFIG_PATH="launchpad/v${VERSION}/config.toml"
+          CONFIG_URL="https://cdn.jsdelivr.net/gh/${GITHUB_REPOSITORY}@${METADATA_COMMIT}/${CONFIG_PATH}"
+          echo "config_path=firmware-dist/${CONFIG_PATH}" >> "${GITHUB_OUTPUT}"
+          echo "config_url=${CONFIG_URL}" >> "${GITHUB_OUTPUT}"
+
+      - name: Generate release notes
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.full }}
+          CONFIG_URL: ${{ steps.distribution.outputs.config_url }}
+        run: |
+          set -euo pipefail
+          PREVIOUS_TAG="$(git describe --tags --abbrev=0 --match 'v[0-9]*' "${GITHUB_REF_NAME}^" 2>/dev/null || true)"
+          REPOSITORY_URL="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          APP_LAUNCHPAD="https://espressif.github.io/esp-launchpad/?flashConfigURL=${CONFIG_URL}&app=Wireless_power_emergency_stop_app&exact=true"
+          MERGED_LAUNCHPAD="https://espressif.github.io/esp-launchpad/?flashConfigURL=${CONFIG_URL}&app=Wireless_power_emergency_stop_merged&exact=true"
+          {
+            echo "## Wireless Power Emergency Stop v${VERSION}"
+            echo
+            echo "### 版本变更"
+            echo
+            if [[ -n "${PREVIOUS_TAG}" ]]; then
+              git log --no-merges --pretty='- [`%h`]('"${REPOSITORY_URL}"'/commit/%H) %s' "${PREVIOUS_TAG}..${GITHUB_REF_NAME}"
+              echo
+              echo "[查看完整差异](${REPOSITORY_URL}/compare/${PREVIOUS_TAG}...${GITHUB_REF_NAME})"
+            else
+              git log --no-merges --pretty='- [`%h`]('"${REPOSITORY_URL}"'/commit/%H) %s' "${GITHUB_REF_NAME}"
+            fi
+            cat <<EOF
+
+          ### 固件与烧录
+
+          | 固件 | 起始地址 | 用途 |
+          |------|----------|------|
+          | \`*_app_v*.bin\` | \`0x10000\` | 只更新APP，保留NVS配对、校准和业务配置。 |
+          | \`*_merged_v*.bin\` | \`0x0\` | 首次烧录或完整恢复；会清除NVS数据。 |
+          EOF
+            if [[ -n "${CONFIG_URL}" ]]; then
+              echo
+              echo "- [APP固件在线烧录](${APP_LAUNCHPAD})"
+              echo "- [merged固件在线烧录](${MERGED_LAUNCHPAD})"
+            else
+              echo
+              echo "本次发布未生成在线烧录配置，请下载固件后通过USB/串口手动烧录。"
+            fi
+            cat <<'EOF'
+
+          急停开关不支持OTA。两个固件均通过USB/串口手动烧录。只有bootloader和分区表未变化时才能使用APP固件。
+          EOF
+          } > release_notes.md
+
+      - name: Create GitHub Release
+        if: steps.distribution.outcome == 'success'
         uses: softprops/action-gh-release@v2
         with:
-          fail_on_unmatched_files: true
-          generate_release_notes: true
-          body: |
-            Emergency Stop firmware with Pro V2 wireless integration.
-            Includes live measurements, OFF retries, and optional detailed refusal feedback.
-            APP: flash at 0x10000, preserving NVS when layout is unchanged.
-            Merged: flash at 0x0; clears NVS pairing/calibration data.
           files: |
             ${{ steps.artifacts.outputs.app_name }}
             ${{ steps.artifacts.outputs.merged_name }}
             SHA256SUMS
+            ${{ steps.distribution.outputs.config_path }}
+          body_path: release_notes.md
+
+      - name: Create GitHub Release without distribution metadata
+        if: steps.distribution.outcome != 'success'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.artifacts.outputs.app_name }}
+            ${{ steps.artifacts.outputs.merged_name }}
+            SHA256SUMS
+          body_path: release_notes.md

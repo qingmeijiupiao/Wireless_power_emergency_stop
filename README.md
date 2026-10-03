@@ -289,6 +289,23 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 不要把 APP 固件写入 `0x0`，也不要把 merged 固件写入 `0x10000`。曾观察到 USB 复位停在
 下载模式，拔插 USB 后恢复。
 
+## 在线烧录与固件下载
+
+ESP Launchpad 需要使用支持 Web Serial 的 Chromium 系浏览器。
+
+| 入口 | 说明 |
+|------|------|
+| [APP 固件在线烧录](https://espressif.github.io/esp-launchpad/?flashConfigURL=https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/launchpad/latest.toml&app=Wireless_power_emergency_stop_app&exact=true) | 保留 NVS，适合常规升级 |
+| [merged 固件在线烧录](https://espressif.github.io/esp-launchpad/?flashConfigURL=https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/launchpad/latest.toml&app=Wireless_power_emergency_stop_merged&exact=true) | 完整安装或恢复，会清除 NVS |
+
+固定的最新固件地址：
+
+- [最新 APP 固件](https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/latest/app.bin)
+- [最新 merged 固件](https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/latest/merged.bin)
+- [最新版本元数据](https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@firmware-dist/last.toml)
+
+不要把 APP 固件写入 `0x0`，也不要把 merged 固件写入 `0x10000`。
+
 ## 版本与发布
 
 版本格式为 `MAJOR.MINOR.PATCH`：
@@ -299,8 +316,8 @@ esptool.py --chip esp32c3 write_flash 0x0 Wireless_power_emergency_stop_merged.b
 - 编译时间统一按 UTC+8 写入固件。
 
 推送 `main`、提交 PR 或手动运行会触发 CI，编译固件、验证合并固件布局并上传 Actions
-artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged 和
-SHA256SUMS，发布到本仓库的 GitHub Release。
+artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged、
+SHA256SUMS 和 Launchpad 配置，发布到本仓库的 GitHub Release 并更新 `firmware-dist` 分支。
 
 ## 组件文档
 
