@@ -45,11 +45,12 @@ void UiManager::reset(int64_t now_us) {
         (saved_fault & 0xffffff00U) == kFaultMagic) {
         const int page = saved_fault & 255;
         if (page == 6 || page == 7 || (page >= 10 && page <= 18)) {
-            state_.notice.restore(page, now_us, RuntimeSettings::get("notice_ms") * 1000LL);
+            state_.notice.restore(page, now_us, RuntimeSettings::get(RuntimeSettings::Id::NoticeMs) * 1000LL);
             state_.fault_page = page;
             ESP_LOGI(TAG, "RESTORED_FAULT_HISTORY page=%d", page);
         }
     }
+    published_fault_.store(state_.fault_page);
     redraw_ = true;
 }
 
@@ -64,16 +65,17 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
     }
     state_.current_fault = ProductUi::fault_page(remote);
     // 新故障出现：记录页面、写入 RTC、取消确认标记并要求重绘。
-    if (state_.notice.update(state_.current_fault, now_us, RuntimeSettings::get("notice_ms") * 1000LL,
+    if (state_.notice.update(state_.current_fault, now_us, RuntimeSettings::get(RuntimeSettings::Id::NoticeMs) * 1000LL,
                              remote.on_attempt)) {
         state_.fault_page = state_.notice.page;
+        published_fault_.store(state_.fault_page);
         saved_fault = kFaultMagic | static_cast<uint32_t>(state_.notice.page);
         saved_fault_check = ~saved_fault;
         state_.fault_acknowledged = false;
         result.activity = true;
         redraw_ = true;
         ESP_LOGI(TAG, "FAULT_NOTICE page=%d hold_ms=%lu", state_.notice.page,
-                 static_cast<unsigned long>(RuntimeSettings::get("notice_ms")));
+                 static_cast<unsigned long>(RuntimeSettings::get(RuntimeSettings::Id::NoticeMs)));
         DEVICE_EVENT_I(kEventTag, "fault notice page=%d protection=%u attempt=%lu", state_.notice.page,
                        remote.protection_mask, static_cast<unsigned long>(remote.on_attempt));
     }
@@ -103,6 +105,11 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
         state_.low_notice_until = 0;
     }
 
+    if (state_.menu.view == UiPolicy::View::Message && state_.message == 11 &&
+        now_us >= state_.low_notice_until) {
+        state_.menu.home();
+        redraw_ = true;
+    }
     const UiPolicy::View view_before = state_.menu.view;
     Update page_update = resolve(remote)->handle_button(remote, event, now_us, state_);
     if (state_.menu.view != view_before)
@@ -131,7 +138,7 @@ bool UiManager::observe_state(const Model &model) {
     }
     // 低电判定：有有效读数、低于阈值且未接外部供电。
     const bool low = model.battery_mv > 0 &&
-                     model.battery_mv <= static_cast<int>(RuntimeSettings::get("low_mv")) && !model.usb;
+                     model.battery_mv <= static_cast<int>(RuntimeSettings::get(RuntimeSettings::Id::LowMv)) && !model.usb;
     if (!low)
         state_.low_notified = false;
     // 低电提示只在主页、无进行中动作、无故障且未连接失败时弹出一次。
@@ -141,7 +148,7 @@ bool UiManager::observe_state(const Model &model) {
         state_.message = 11;
         state_.menu.view = UiPolicy::View::Message;
         state_.menu.touched = model.now_us;
-        state_.low_notice_until = model.now_us + RuntimeSettings::get("notice_ms") * 1000LL;
+        state_.low_notice_until = model.now_us + RuntimeSettings::get(RuntimeSettings::Id::NoticeMs) * 1000LL;
         redraw_ = true;
     }
     return activity;
@@ -159,17 +166,25 @@ Page *UiManager::resolve(const EmergencyRemote::Snapshot &remote) const {
     return best;
 }
 
-int UiManager::page_key(const Model &model) const { return resolve(model.remote)->page_key(model, state_); }
+Page *UiManager::resolve(const Model &model) const {
+    if (model.sleep.countdown && !UiPolicy::urgent(model.remote, state_.fault_acknowledged) &&
+        sleep_notice_allowed(model.now_us))
+        return const_cast<StatusPage*>(&status_);
+    return resolve(model.remote);
+}
+
+int UiManager::page_key(const Model &model) const { return resolve(model)->page_key(model, state_); }
 
 void UiManager::render(uint8_t *frame, const Model &model) {
-    resolve(model.remote)->render(frame, model, state_);
+    if (model.sleep.countdown && resolve(model) == &status_) state_.menu.home();
+    resolve(model)->render(frame, model, state_);
     // 右侧状态栏最后绘制，叠加在内容之上：警告条件为存在故障页或低电。
-    const bool output_fresh = model.remote.output_time_us > 0 &&
+    const bool output_fresh = model.remote.output_confirmed && model.remote.output_time_us > 0 &&
                               model.now_us - model.remote.output_time_us <
-                                  RuntimeSettings::get("fresh_ms") * 1000LL;
+                                  RuntimeSettings::get(RuntimeSettings::Id::FreshMs) * 1000LL;
     const bool closing_unconfirmed = model.remote.connection_failed && model.remote.output_on && model.remote.busy;
     const bool low = model.battery_mv > 0 &&
-                     model.battery_mv <= static_cast<int>(RuntimeSettings::get("low_mv")) && !model.usb;
+                     model.battery_mv <= static_cast<int>(RuntimeSettings::get(RuntimeSettings::Id::LowMv)) && !model.usb;
     ProductUi::render_rail(frame, model.remote, model.battery_percent, model.usb, output_fresh,
                            ProductUi::fault_page(model.remote) >= 0 || low, closing_unconfirmed);
 }

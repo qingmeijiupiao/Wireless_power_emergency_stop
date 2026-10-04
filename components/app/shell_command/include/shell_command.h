@@ -16,7 +16,7 @@ namespace ShellCommand {
  * 和 `blackbox` 命令。命令层只负责参数解析、输出和调用应用服务，不持有
  * ESP-NOW 请求状态，也不依赖运行任务派发。
  *
- * @note 仅在检测到 USB 插入后调用。调用前必须完成 BatteryVoltage、
+ * @note 启动时无条件注册，之后 USB 插入即可使用。调用前必须完成 BatteryVoltage、
  *       EmergencyRemote 和黑匣子服务初始化。
  * @return ESP_OK 初始化成功，其他值来自 Shell::init()
  */

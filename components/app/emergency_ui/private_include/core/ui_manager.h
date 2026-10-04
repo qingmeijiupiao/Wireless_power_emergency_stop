@@ -8,6 +8,7 @@
 #include "pages/message_page.h"
 #include "pages/status_page.h"
 #include <cstdint>
+#include <atomic>
 namespace EmergencyUi {
 /** UI 管理器单例。 */
 class UiManager {
@@ -25,7 +26,7 @@ class UiManager {
     /** @brief 渲染当前激活页面并叠加右侧状态栏。 */
     void render(uint8_t *frame, const Model &model);
     /** @brief 最近一次记录的故障页编号。 */
-    int last_fault_page() const { return state_.fault_page; }
+    int last_fault_page() const { return published_fault_.load(); }
     /** @brief 故障/低电提示的最晚保持截止时刻。 */
     int64_t notice_deadline() const;
     /** @brief 当前是否允许开始休眠倒计时。 */
@@ -39,8 +40,11 @@ class UiManager {
     UiManager() = default;
     /** @brief 在已注册页面中选择优先级最高的激活页面。 */
     Page *resolve(const EmergencyRemote::Snapshot &remote) const;
+    /** @brief 倒计时优先于普通菜单/消息，紧急控制与有效故障仍优先。 */
+    Page *resolve(const Model &model) const;
 
     UiState state_;                                  /**< 共享 UI 状态 */
+    std::atomic<int> published_fault_{-1};            /**< Shell 可读取的故障历史 */
     StatusPage status_;                              /**< 状态屏 */
     MenuPage menu_;                                  /**< 菜单屏 */
     MessagePage message_page_;                       /**< 消息屏 */

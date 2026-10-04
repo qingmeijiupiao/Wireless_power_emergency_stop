@@ -48,7 +48,7 @@ int StatusPage::page_key(const Model &model, const UiState &state) const {
         page = remote.online ? kHomeOnline : kHomeOffline;
     if (remote.connection_failed && state.menu.view == UiPolicy::View::Home)
         page = kFailurePage;
-    if (state.menu.view == UiPolicy::View::Home && model.sleep.countdown)
+    if (model.sleep.countdown && !UiPolicy::urgent(remote, state.fault_acknowledged))
         page = kCountdownPage;
     return page;
 }

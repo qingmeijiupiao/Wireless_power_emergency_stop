@@ -3,7 +3,7 @@
 `Wireless_power_emergency_stop` 是一个基于 ESP-IDF 的 ESP32-C3 无线急停开关，
 
 它的核心行为不是“发一个无线包”，而是一笔完整的控制事务：急停触点闭合后优先关闭并
-持续重试，触点稳定释放后先取得关闭业务确认才尝试开启，同时维护配对、信道恢复、真实
+在 `connect_ms` 内重试，超时后停止并允许休眠；触点稳定释放后先取得关闭业务确认才尝试开启，同时维护配对、信道恢复、真实
 测量显示、电池管理、深度休眠和黑匣子日志。应用层、无线协议层和链路层相互独立，便于
 替换控制目标或修改按键策略。
 
@@ -17,7 +17,7 @@
 ## 主要功能
 
 - **急停优先关闭**：急停触点下降沿在 ISR 中锁存，控制工作线程独立于 UI 传输，立即
-  发起关闭并保持重试，不产生自动开启。
+  发起关闭并在固定期限内重试；超时停止无线并允许休眠，不声称已确认关闭。
 - **稳定释放后开启**：触点需持续释放达到 `release_ms`，并先收到关闭业务确认，才发送
   开启请求；开启被拒绝不会反复重试。
 - **可靠无线控制**：在 ESP-NOW 之上实现链路 ACK、超时重传、重复包过滤和业务响应等待，
@@ -35,14 +35,16 @@
 
 ## 默认运行流程
 
-急停控制可以理解为一笔持续到“关闭已确认”的控制事务：
+急停控制事务等待“关闭已确认”或本轮 `connect_ms` 总期限耗尽：
 
 ```mermaid
 flowchart TD
     Idle["待机 / 深睡"] --> Close["急停触点闭合或存在关闭意图"]
     Close --> StopTx["发送关闭请求并等待业务确认"]
     StopTx --> StopAck{"确认输出已关闭？"}
-    StopAck -->|否| Retry["按 off_retry_ms 重试并触发信道恢复"]
+    StopAck -->|否且未超时| Retry["按 off_retry_ms 重试并触发信道恢复"]
+    StopAck -->|关断总期限耗尽| Timeout["保留未确认状态 / 停止无线重试 / 允许休眠"]
+    Timeout --> Idle
     Retry --> StopTx
     StopAck -->|是| Release{"触点稳定释放且达到 release_ms？"}
     Release -->|否| Idle
@@ -63,20 +65,34 @@ flowchart TD
 
 ### 源码启动流程
 
-`main/app_main.cpp` 明确展示组件初始化和唯一的协调循环，不通过独立运行模块间接调度。
-无线控制工作在独立任务中运行，急停 ISR 只负责锁存触点事件。
+`main/app_main.cpp` 编排有依赖的初始化，随后启动 `app_controller` 协调任务并注册 Shell，主任务返回。
+急停控制、Button 事件和电池采样各自运行；OLED 初始化与首次采样可以同时进行，
+主任务不再先等待 100 ms 或等待首次电池读数。
 
 ```mermaid
 flowchart TD
     Start["app_main"] --> HW["hardware：配置 GPIO、安装急停 ISR"]
     HW --> Button["emergency_ui 初始化公共 Button 与手势队列"]
-    Button --> Battery["battery_voltage：初始化并完成一次采样"]
-    Battery --> Storage["HXC_NVS / runtime_settings / blackbox_service"]
+    Button --> Storage["HXC_NVS / runtime_settings / blackbox_service / BatteryStatus"]
     Storage --> Remote["emergency_remote：启动控制工作线程"]
-    Remote --> Shell["shell_command：注册维护命令"]
-    Shell --> UI["emergency_ui：初始化 SH1106 与 UiManager"]
-    UI --> Loop["协调循环：按键、遥控、电池、休眠与渲染"]
+    Remote --> Battery["battery_voltage：初始化采样驱动"]
+    Battery --> Logic["UI 状态初始化 / 启动诊断"]
+    Logic --> Controller["app_controller：发起首次异步采样 / 创建协调任务"]
+    Controller --> Sample["采样任务：供电稳定等待 / ADC / 结果入队"]
+    Controller --> UI["协调任务：UI 状态 / 20ms 模块调度"]
+    UI -->|最新帧邮箱| OLED["独立 OLED 执行任务：I2C / 退避重建"]
+    Controller --> Shell["app_main：注册维护命令后返回"]
+    Sample -->|单槽结果邮箱| UI
+    Remote -->|只读快照| UI
 ```
+
+100 ms 供电稳定窗口从 GPIO 初始化完成时计算，采样任务只等待剩余时间；NVS 和无线初始化
+占用的时间会计入窗口。首次电压未就绪时界面使用未知值或 RTC 保留电量，取得结果后自动更新。
+启动诊断不等待电池，首次成功采样另记 `boot battery ready` 产品事件。
+
+UI 状态由协调任务管理，OLED 驱动由显示任务独占；休眠关闭通过带确认的代际命令握手。
+Shell 通过原子故障历史和带互斥的
+BatteryStatus 接口读取状态。采样回调只发布结果，不直接操作 UI 或电量服务。
 
 ## 软件架构
 
@@ -85,9 +101,14 @@ flowchart TD
 
 ```text
 main/
-  app_main.cpp                高层启动入口与服务协调循环
+  app_main.cpp                初始化与任务启动入口
 components/
   app/                        与本产品行为直接相关的应用组件
+    app_controller/           产品协调任务与模型构建
+      src/battery_monitor.cpp 采样、USB、校准启动与电量上报策略
+      src/input_actions.cpp   菜单动作落地与配对入口检查
+      src/sleep_coordinator.cpp 手动/自动休眠协调
+      src/event_recorder.cpp  状态变化日志与独立去重基准
     battery_voltage/          电池电压采样与校准
     boot_diagnostics/         固件、复位/唤醒、配置和电池启动快照
     emergency_remote/         急停事务、关闭重试、信道恢复和数据快照
@@ -121,7 +142,8 @@ flowchart LR
 
 这条规则的目的不是追求目录形式，而是限制依赖范围：
 
-- `main` 展示组件初始化顺序、协调循环和运行模式，不实现工具细节。
+- `main` 展示组件初始化顺序与任务启动，不实现运行期业务。
+- `app_controller` 编排运行期调用顺序；各功能模块分别持有自己的时序与状态。
 - `app` 决定急停、菜单、休眠和命令的含义，以及如何反馈结果。
 - `middleware` 负责可靠传输、配对、日志和按键等可复用机制，不决定产品语义。
 - `bsp` 封装 ESP-IDF 外设和平台接口，不依赖产品业务。
@@ -140,6 +162,10 @@ flowchart LR
 
 ### 界面与按键
 
+`app_controller` 的协调循环只串联电池、输入动作、休眠、事件记录和界面刷新。
+业务分支与时序状态分别位于私有功能模块；拆分职责不会为每个小功能再创建轮询任务。
+模块边界及通信方式见 [app_controller](components/app/app_controller/README.md)。
+
 `emergency_ui` 采用页面框架：`core/` 定义 `Page` 抽象与 `UiManager`，`pages/` 实现状态屏、
 菜单屏和消息屏。`UiManager` 统一负责选页、按键分发、故障确认、低电提示和刷新节奏。
 
@@ -148,7 +174,7 @@ flowchart LR
 - `MessagePage`：一次性消息页。
 
 `emergency_ui` 内部的按键适配基于公共 `Button` 组件，在 GPIO3 上识别短按与长按并投递到手势
-队列，由主循环消费；唤醒时若按键仍被按住，会抑制到释放为止。按键阈值采用公共组件固定值
+队列，由协调任务消费；唤醒时若按键仍被按住，会抑制到释放为止。按键阈值采用公共组件固定值
 （消抖 5 ms、长按 1000 ms、超长按 3000 ms、双击窗口 250 ms），本工程只使用短按与长按。
 
 ### 深度休眠
@@ -323,6 +349,7 @@ SHA256SUMS 和 Launchpad 配置，发布到本仓库的 GitHub Release 并更新
 
 | 模块 | 文档 |
 |------|------|
+| 产品协调器 | [app_controller](components/app/app_controller/README.md) |
 | 电池采样 | [battery_voltage](components/app/battery_voltage/README.md) |
 | 电源管理 | [power_manager](components/app/power_manager/README.md) |
 | Shell 命令 | [shell_command](components/app/shell_command/README.md) |

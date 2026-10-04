@@ -36,7 +36,7 @@ Update MenuPage::handle_button(const EmergencyRemote::Snapshot &remote, Gesture 
     (void)remote;
     UiPolicy::Menu &menu = state.menu;
     // 非主页停留超时则自动回主页，防止误触后长期停留在菜单。
-    if (menu.view != UiPolicy::View::Home && now_us - menu.touched > RuntimeSettings::get("menu_idle_ms") * 1000LL) {
+    if (menu.view != UiPolicy::View::Home && now_us - menu.touched > RuntimeSettings::get(RuntimeSettings::Id::MenuIdleMs) * 1000LL) {
         menu.home();
         return {};
     }
@@ -73,7 +73,7 @@ Update MenuPage::handle_list(Gesture event, UiState &state) {
     case 3:
         // 第 3 项进入休眠时长页，并把选择定位到当前配置值。
         menu.view = UiPolicy::View::SleepTime;
-        menu.sleep_choice = UiPolicy::sleep_time_index(RuntimeSettings::get("idle_ms"));
+        menu.sleep_choice = UiPolicy::sleep_time_index(RuntimeSettings::get(RuntimeSettings::Id::IdleMs));
         break;
     case 6:
         // 第 6 项进入设备信息页。
@@ -109,7 +109,13 @@ Update MenuPage::handle_confirm(Gesture event, UiState &state) {
     }
     // 已勾选且满足确认条件：上报与条目号对应的动作并返回主页。
     Update result;
-    result.action = static_cast<Action>(menu.selected);
+    switch (menu.selected) {
+    case 1: result.action = Action::AlwaysOn; break;
+    case 2: result.action = Action::Sleep; break;
+    case 4: result.action = Action::Pair; break;
+    case 5: result.action = Action::Repair; break;
+    default: break;
+    }
     menu.home();
     return result;
 }

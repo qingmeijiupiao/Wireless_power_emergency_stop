@@ -10,6 +10,14 @@ namespace RuntimeSettings {
 // 自动休眠时间菜单的候选值(ms)：5、10、30、60 分钟，下标供 UI 选择使用。
 constexpr uint32_t kSleepTimesMs[] = {300000, 600000, 1800000, 3600000};
 
+/** 运行参数索引，与私有参数表逐项对应；字符串名称仅用于 Shell/持久化。 */
+enum class Id : uint8_t { ConnectMs, IdleMs, MenuIdleMs, NoticeMs, ReleaseMs, OffAckMs,
+    OffRetryMs, OnAckMs, FreshMs, BatteryMs, ReportMs, LowMv, Count };
+/** @brief 按类型无锁读取参数；非法索引返回 0。 */
+uint32_t get(Id id);
+/** @brief 按类型设置参数，范围校验与持久化/发布完整串行。 */
+bool set(Id id, uint32_t value);
+
 // 从 NVS 载入全部参数到原子缓存，必须在其它模块读取前调用一次。
 void init();
 

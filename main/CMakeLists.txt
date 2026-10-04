@@ -5,19 +5,17 @@
 
 # 主程序直接依赖的应用组件列表。
 set(app_dependencies
-    battery_level
+    app_controller
+    app_diagnostics
     battery_voltage
     blackbox
     blackbox_service
     boot_diagnostics
-    diagnostic_log
     emergency_remote
     emergency_ui
     esp_common
     esp_system
     esp_timer
-    espnow_link
-    freertos
     hardware
     HXC_NVS
     log

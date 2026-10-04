@@ -4,10 +4,13 @@
  */
 #pragma once
 #include "core/ui_types.h"
+#include "esp_err.h"
 namespace EmergencyUi {
 namespace Buttons {
 /** @brief 初始化 GPIO3 上的公共 Button 并准备手势队列。 */
-void init();
+esp_err_t init();
+/** @return 本次启动因队列已满丢弃的手势数量。 */
+uint32_t dropped();
 /**
  * @brief 非阻塞读取一个手势。
  * @param gesture 输出手势；无手势时保持不变。

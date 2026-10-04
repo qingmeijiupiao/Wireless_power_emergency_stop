@@ -3,8 +3,9 @@
  * @brief 急停控制器 UI 公开接口：屏幕初始化、按键输入处理、状态观察与渲染。
  */
 #pragma once
-#include "emergency_remote.h"
+#include "remote_snapshot.h"
 #include "sleep_policy.h"
+#include "esp_err.h"
 namespace EmergencyUi {
 /** 菜单或提示确认后需要业务层执行的动作。 */
 enum class Action { None, AlwaysOn, Sleep, SleepTime, Pair, Repair };
@@ -26,8 +27,10 @@ struct Model {
     int64_t now_us = 0;                    /**< 当前时间，微秒 */
 };
 /** @brief 初始化 GPIO3 按键与手势队列。 */
-void init_buttons();
-/** @brief 初始化屏幕、UI 管理器与故障历史。 */
+esp_err_t init_buttons();
+/** @return 启动以来队列满导致丢弃的 UI 手势数量。 */
+uint32_t dropped_gestures();
+/** @brief 初始化 UI 状态与故障历史；屏幕由 AppController 任务随后调用 restore() 初始化。 */
 void init();
 /**
  * @brief 消费按键手势并推进 UI 状态机，同时刷新故障提示与低电状态。
@@ -42,7 +45,7 @@ Update handle_input(const EmergencyRemote::Snapshot &remote, int64_t tick);
  */
 bool observe_state(const Model &model);
 /**
- * @brief 按当前状态渲染一帧并写入屏幕。
+ * @brief 按当前状态渲染一帧，零等待提交到 OLED 最新帧邮箱。
  * @param model 渲染模型
  * @param dirty 是否有强制重绘请求
  */
@@ -57,8 +60,8 @@ int64_t notice_deadline();
 bool sleep_notice_allowed(int64_t now_us);
 /** @brief 进入休眠前绘制“即将休眠”画面。 */
 void prepare_sleep();
-/** @brief 关闭屏幕供电。 */
-void shutdown();
-/** @brief 重新初始化屏幕并请求完整重绘。 */
+/** @brief 关闭新帧入口并等待 OLED 任务释放总线；失败时不得隔离显示 GPIO。 */
+bool shutdown();
+/** @brief 启动新显示代际，异步恢复屏幕并请求完整重绘。 */
 void restore();
 } // namespace EmergencyUi

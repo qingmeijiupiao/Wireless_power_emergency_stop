@@ -11,6 +11,8 @@
 #include "diagnostic_log.h"
 #include "esp_log.h"
 #include <atomic>
+#include "freertos/FreeRTOS.h"
+#include "freertos/semphr.h"
 #include <cstdio>
 #include <cstring>
 namespace RuntimeSettings {
@@ -31,7 +33,7 @@ struct Entry {
     uint32_t min, max;
 };
 // 全部可配置运行参数的名称、默认值/初值与有效范围。单位说明：
-//   connect_ms 遥控连接超时；idle_ms 空闲自动休眠；menu_idle_ms 菜单停留；
+//   connect_ms 连接检测与每轮关断总期限；idle_ms 空闲自动休眠；menu_idle_ms 菜单停留；
 //   notice_ms 休眠前提示时长；release_ms 长按后的释放窗口；
 //   off_ack_ms/off_retry_ms 关断确认与重试；on_ack_ms 开启确认；
 //   fresh_ms 数据新鲜度；battery_ms 采样周期；report_ms 电量上报周期；low_mv 低电阈值。
@@ -49,14 +51,17 @@ Entry entries[] = {
     {"report_ms", {"report_ms", 30000}, 30000, 1000, 3600000},
     {"low_mv", {"low_mv", 3500}, 3500, 3000, 4000},
 };
+static_assert(sizeof(entries) / sizeof(entries[0]) == static_cast<unsigned>(Id::Count));
 // “常亮”开关的持久化存储与其运行期原子镜像。
 HXC::NVS_DATA<uint32_t> stored_always_on("always_on", 0);
 std::atomic_bool display_always_on{false};
+SemaphoreHandle_t writer_mutex = nullptr; // 覆盖持久化与运行值发布的完整写事务。
 } // namespace
 // 加载 NVS：仅接受落在 [min,max] 内的存储值，超范围或缺失时保留表内默认值。
 void init() {
-    if (HXC::NVS_Base::setup() != ESP_OK)
-        return;
+    ESP_ERROR_CHECK(HXC::NVS_Base::setup());
+    if (!writer_mutex) writer_mutex = xSemaphoreCreateMutex();
+    ESP_ERROR_CHECK(writer_mutex ? ESP_OK : ESP_ERR_NO_MEM);
     for (auto &e : entries) {
         const uint32_t stored = e.storage.read();
         if (stored >= e.min && stored <= e.max)
@@ -64,8 +69,17 @@ void init() {
     }
     display_always_on.store(stored_always_on.read() != 0);
 }
+uint32_t get(Id id) {
+    const auto index = static_cast<unsigned>(id);
+    return index < static_cast<unsigned>(Id::Count) ? entries[index].value.load() : 0;
+}
+bool set(Id id, uint32_t value) {
+    const auto index = static_cast<unsigned>(id);
+    return index < static_cast<unsigned>(Id::Count) && set(entries[index].name, value);
+}
 // 按名读取原子缓存；未知名称返回 0。
 uint32_t get(const char *name) {
+    if (!name) return 0;
     for (auto &e : entries)
         if (!strcmp(name, e.name))
             return e.value.load();
@@ -73,15 +87,20 @@ uint32_t get(const char *name) {
 }
 // 先做范围校验并写入 NVS，成功后再更新缓存；有效变化会写入黑匣子便于审计。
 bool set(const char *name, uint32_t value) {
+    if (!name) return false;
     for (auto &e : entries)
         if (!strcmp(name, e.name)) {
             if (value < e.min || value > e.max)
                 return false;
+            if (!writer_mutex) return false;
+            xSemaphoreTake(writer_mutex, portMAX_DELAY);
             if (e.storage.set(value) != ESP_OK) {
+                xSemaphoreGive(writer_mutex);
                 ESP_LOGE(TAG, "setting write failed: %s=%lu", name, static_cast<unsigned long>(value));
                 return false;
             }
             const auto old = e.value.exchange(value);
+            xSemaphoreGive(writer_mutex);
             if (old != value)
                 DEVICE_EVENT_I(kEventTag, "setting %s: %lu -> %lu", name, static_cast<unsigned long>(old),
                                static_cast<unsigned long>(value));
@@ -104,12 +123,16 @@ void record_snapshot() {
 bool always_on() { return display_always_on.load(); }
 // 持久化常亮开关并更新镜像；写入失败返回 false 且不改动运行态。
 bool set_always_on(bool value) {
+    if (!writer_mutex) return false;
+    xSemaphoreTake(writer_mutex, portMAX_DELAY);
     if (stored_always_on.set(value ? 1U : 0U) != ESP_OK) {
+        xSemaphoreGive(writer_mutex);
         ESP_LOGE(TAG, "setting always_on write failed: %u", value ? 1U : 0U);
         return false;
     }
-    DEVICE_EVENT_I(kEventTag, "setting always_on: %u -> %u", display_always_on.load() ? 1U : 0U, value ? 1U : 0U);
-    display_always_on.store(value);
+    const bool old = display_always_on.exchange(value);
+    xSemaphoreGive(writer_mutex);
+    DEVICE_EVENT_I(kEventTag, "setting always_on: %u -> %u", old ? 1U : 0U, value ? 1U : 0U);
     return true;
 }
 

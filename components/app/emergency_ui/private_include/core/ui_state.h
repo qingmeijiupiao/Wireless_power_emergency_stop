@@ -3,7 +3,7 @@
  * @brief UI 跨页面共享状态：菜单、故障提示、消息与低电提示等。
  */
 #pragma once
-#include "emergency_remote.h"
+#include "remote_snapshot.h"
 #include "ui_policy.h"
 namespace EmergencyUi {
 /** 由 UiManager 持有、各 Page 读写的共享 UI 状态。 */

@@ -15,6 +15,7 @@ idf_build_set_property(MINIMAL_BUILD ON)
 set(EXTRA_COMPONENT_DIRS
     "components/app"
     "components/bsp"
+    "components/overrides"
 )
 
 # MAJOR.MINOR 由开发者手工维护。PATCH=99 标识本地构建；
@@ -26,6 +27,9 @@ set(PROJECT_VER "v${VERSION_MAJOR}.${VERSION_MINOR}.${VERSION_PATCH}")
 
 # 声明工程名，必须先于后续的 idf_build_set_property 调用。
 project(Wireless_power_emergency_stop)
+
+# Shell 诊断不能抢占优先级 5 的急停控制任务。
+idf_build_set_property(COMPILE_DEFINITIONS "SHELL_TASK_PRIORITY=2" APPEND)
 
 # 将版本号注入为编译期宏，供 Shell 的 version 命令读取。
 idf_build_set_property(COMPILE_DEFINITIONS "VERSION_MAJOR=${VERSION_MAJOR}" APPEND)

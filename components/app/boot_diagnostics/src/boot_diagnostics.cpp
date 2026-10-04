@@ -14,7 +14,7 @@
 // - esp_system.h：复位原因查询
 #include "boot_diagnostics.h"
 #include "hardware.h"
-#include "battery_level.h"
+#include "battery_status.h"
 #include "runtime_settings.h"
 #include "diagnostic_log.h"
 #include "espnow_link.h"
@@ -31,7 +31,7 @@ void append_boot(bool release_wake) {
     using namespace Hardware;
     // 读取电池状态；读取失败时后续以 0 / -1 占位，避免输出未初始化值。
     BatteryLevel::Status battery = {};
-    const bool battery_valid = BatteryLevel::get_status(battery);
+    const bool battery_valid = BatteryStatus::get_status(battery);
     // 首条记录：固件/构建/IDF 版本、复位原因、唤醒原因位图、GPIO 唤醒状态。
     DEVICE_EVENT_I(
         kEventTag,

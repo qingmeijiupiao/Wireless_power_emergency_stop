@@ -18,6 +18,7 @@
 #include "adc.h"
 #include "driver/gpio.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -92,21 +93,34 @@ adc_t battery_adc(BATTERY_ADC_CHANNEL);
 HXC::NVS_DATA<CalibrationRecord> stored_calibration("bat_cal", DEFAULT_CALIBRATION);
 // 模块是否已完成初始化。
 bool initialized;
+// 初始化后只读，所有采样任务共享同一个供电稳定截止时间。
+int64_t sample_not_before_us = 0;
 // 是否有异步采样任务正在运行（互斥锁保护）。
 bool sampling;
 // 自动校准任务是否正在运行（互斥锁保护）。
 bool calibration_monitor_running;
 // 保护所有共享状态（采样标志、结果、倍率、回调槽、校准窗口等）。
 SemaphoreHandle_t state_mutex;
-// 二值信号量，采样任务完成后释放，wait_mv() 据此得知结果就绪。
-SemaphoreHandle_t completion;
-// 最近一次采样的结果，初始为无效状态。
-esp_err_t last_result = ESP_ERR_INVALID_STATE;
-// 最近一次换算后的电池电压（mV）。
-int last_voltage_mv;
-// 本次异步采样的完成回调及其上下文，采样任务取出后清空。
-CompletionCallback completion_callback;
-void* completion_context;
+// 固定请求池：等待者持有引用直到复制结果；下一次采样不覆盖旧结果或通知。
+struct SampleRequest {
+    SemaphoreHandle_t completion = nullptr;
+    unsigned references = 0; // state_mutex 保护；最近请求、工作者、等待者各持一份。
+    uint32_t sequence = 0;
+    esp_err_t result = ESP_ERR_INVALID_STATE;
+    int voltage_mv = 0;
+    CompletionCallback callback = nullptr;
+    void* context = nullptr;
+};
+SampleRequest requests[4];
+SampleRequest* latest_request = nullptr;
+SemaphoreHandle_t sample_ready = nullptr;
+SemaphoreHandle_t sample_idle = nullptr;
+TaskHandle_t sample_worker = nullptr;
+uint32_t next_sequence = 0;
+bool sleep_paused = false;
+uint32_t calibration_epoch = 0; // 重置/USB 边沿/倍率变化使旧稳定窗口失效。
+bool external_power = false;
+esp_err_t calibration_error = ESP_OK;
 // 当前生效的分压倍率（Q16 定点），由持久化校准决定。
 uint32_t divider_scale_q16 = DEFAULT_DIVIDER_SCALE_Q16;
 // NVS 中读出的校准记录是否通过校验。
@@ -228,57 +242,113 @@ esp_err_t read_average_divided_mv(int& divided_voltage_mv) {
     return ESP_OK;
 }
 
-// 异步采样任务主体。流程：使能分压 → 等待 RC 稳定 → 多次采样取平均 →
-// 换算电池电压 → 关闭分压 → 发布结果并唤醒等待者 → 任务自行结束。
-// 分压路径只在采样窗口内导通，所有退出路径都必须恢复高阻以降低静态功耗。
-void sampling_task(void*) {
+/** @brief 执行一个已占用请求；回调返回、GPIO 关闭后才发布空闲握手。 */
+void perform_sample(SampleRequest* request) {
+    const int64_t remaining_us = sample_not_before_us - esp_timer_get_time();
+    if (remaining_us > 0) {
+        const TickType_t ticks = static_cast<TickType_t>(
+            (remaining_us * configTICK_RATE_HZ + 999999) / 1000000);
+        vTaskDelay(ticks + 1);
+    }
     int voltage_mv = 0;
     esp_err_t result = enable_sample_path();
-    if (result == ESP_OK) {
-        result = wait_until_stable();
-    }
+    if (result == ESP_OK) result = wait_until_stable();
     if (result == ESP_OK) {
         int divided_voltage_mv = 0;
         result = read_average_divided_mv(divided_voltage_mv);
-        if (result == ESP_OK) {
-            voltage_mv = apply_divider_scale(divided_voltage_mv);
+        if (result == ESP_OK) voltage_mv = apply_divider_scale(divided_voltage_mv);
+    }
+    const esp_err_t disable_result = disable_sample_path();
+    if (result == ESP_OK) result = disable_result;
+    if (request->callback) request->callback(result, voltage_mv, request->context);
+
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    request->result = result;
+    request->voltage_mv = voltage_mv;
+    // 通知与空闲发布属于同一事务；请求池引用确保唤醒后仍读自己的结果。
+    sampling = false;
+    xSemaphoreGive(request->completion);
+    xSemaphoreGive(sample_idle);
+    --request->references; // 工作者不再访问本请求。
+    xSemaphoreGive(state_mutex);
+}
+
+/** @brief 常驻 ADC 工作者，空闲时阻塞，无周期任务栈分配/释放。 */
+void sampling_task(void*) {
+    for (;;) {
+        xSemaphoreTake(sample_ready, portMAX_DELAY);
+        xSemaphoreTake(state_mutex, portMAX_DELAY);
+        SampleRequest* request = latest_request;
+        xSemaphoreGive(state_mutex);
+        perform_sample(request);
+    }
+}
+
+/** @brief 提交请求；waiter 非空时，在同一锁内给同步调用者保留结果引用。 */
+esp_err_t submit_sample(CompletionCallback callback, void* context, SampleRequest** waiter = nullptr) {
+    if (!initialized) return ESP_ERR_INVALID_STATE;
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    if (sampling || sleep_paused) {
+        xSemaphoreGive(state_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
+    SampleRequest* request = nullptr;
+    for (auto& slot : requests) {
+        if (slot.references == 0 || (&slot == latest_request && slot.references == 1)) {
+            request = &slot;
+            break;
         }
     }
-
-    // 无论前面成败都要关闭分压；仅在尚无错误时把关闭结果作为最终结果。
-    const esp_err_t disable_result = disable_sample_path();
-    if (result == ESP_OK) {
-        result = disable_result;
+    if (!request) {
+        xSemaphoreGive(state_mutex);
+        return ESP_ERR_NO_MEM; // 慢等待者占满池时拒绝新请求，不复用其结果。
     }
-
-    // 在锁内一次性发布结果并取出回调，避免与 wait_mv() 的读取竞争。
-    xSemaphoreTake(state_mutex, portMAX_DELAY);
-    last_result = result;
-    last_voltage_mv = voltage_mv;
-    const CompletionCallback callback = completion_callback;
-    void* const context = completion_context;
-    completion_callback = nullptr;
-    completion_context = nullptr;
+    if (latest_request) --latest_request->references;
+    request->references = waiter ? 3 : 2;
+    request->sequence = ++next_sequence;
+    request->result = ESP_ERR_INVALID_STATE;
+    request->voltage_mv = 0;
+    request->callback = callback;
+    request->context = context;
+    xSemaphoreTake(request->completion, 0);
+    xSemaphoreTake(sample_idle, 0);
+    latest_request = request;
+    sampling = true;
+    if (waiter) *waiter = request;
+    xSemaphoreGive(sample_ready);
     xSemaphoreGive(state_mutex);
+    return ESP_OK;
+}
 
-    // 回调在采样任务上下文执行；先清空共享回调槽，允许回调完成后再次发起采样。
-    if (callback != nullptr) {
-        callback(result, voltage_mv, context);
-    }
-
-    // 先清采样标志再释放完成信号量，确保 wait_mv() 被唤醒时看到的状态一致。
+/** @brief 等待所持引用对应的不可变结果，并释放引用（包括超时路径）。 */
+esp_err_t await_sample(SampleRequest* request, int& voltage_mv, TickType_t wait) {
+    const bool completed = xSemaphoreTake(request->completion, wait) == pdTRUE;
+    if (completed) xSemaphoreGive(request->completion); // 多等待者观察同一完成状态。
     xSemaphoreTake(state_mutex, portMAX_DELAY);
-    sampling = false;
+    const esp_err_t result = completed ? request->result : ESP_ERR_TIMEOUT;
+    if (completed) voltage_mv = request->voltage_mv;
+    --request->references;
     xSemaphoreGive(state_mutex);
-    xSemaphoreGive(completion);
-    vTaskDelete(nullptr);
+    return result;
+}
+
+/** @brief 获取校准代际；保护局部窗口与持久化事务的时序。 */
+uint32_t current_calibration_epoch() {
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    const uint32_t epoch = calibration_epoch;
+    xSemaphoreGive(state_mutex);
+    return epoch;
 }
 
 // 在锁内发布当前校准稳定窗口的进度，供 get_calibration_status() 查询。
 void publish_calibration_window(uint16_t sample_count,
                                 int min_voltage_mv,
-                                int max_voltage_mv) {
+                                int max_voltage_mv, uint32_t epoch) {
     xSemaphoreTake(state_mutex, portMAX_DELAY);
+    if (epoch != calibration_epoch || sleep_paused) {
+        xSemaphoreGive(state_mutex);
+        return;
+    }
     calibration_stable_samples = sample_count;
     calibration_min_mv = min_voltage_mv;
     calibration_max_mv = max_voltage_mv;
@@ -287,11 +357,15 @@ void publish_calibration_window(uint16_t sample_count,
 
 // 将新的分压倍率打包成带校验的校准记录写入 NVS，成功后立即更新运行时的
 // 倍率与有效标志。写 Flash 期间持锁，避免采样任务读到中间状态。
-esp_err_t save_calibration(uint32_t new_scale_q16) {
+esp_err_t save_calibration(uint32_t new_scale_q16, uint32_t epoch) {
     CalibrationRecord record = DEFAULT_CALIBRATION;
     record.divider_scale_q16 = new_scale_q16;
     record.checksum = calibration_checksum(record);
     xSemaphoreTake(state_mutex, portMAX_DELAY);
+    if (sleep_paused || epoch != calibration_epoch) {
+        xSemaphoreGive(state_mutex);
+        return ESP_ERR_INVALID_STATE;
+    }
     const esp_err_t persist_result = stored_calibration.set(record);
     if (persist_result != ESP_OK) {
         xSemaphoreGive(state_mutex);
@@ -299,6 +373,8 @@ esp_err_t save_calibration(uint32_t new_scale_q16) {
     }
     divider_scale_q16 = new_scale_q16;
     stored_calibration_valid = true;
+    ++calibration_epoch;
+    calibration_error = ESP_OK;
     xSemaphoreGive(state_mutex);
     return ESP_OK;
 }
@@ -307,11 +383,13 @@ esp_err_t save_calibration(uint32_t new_scale_q16) {
 // 窗口内电压极差必须始终小于 CALIBRATION_MAX_SPREAD_MV，否则以当前样本为
 // 新起点重开窗口。窗口累计到 CALIBRATION_REQUIRED_SAMPLES 时，认为充电
 // 电压已稳定在 4.2 V 参考电压，据此反推并保存新的分压倍率。每个 USB 插入
-// 周期最多写一次 Flash，完成后退出。
+// 周期成功保存后退出；失败最多重采完整窗口并尝试三次。
 void calibration_monitor_task(void*) {
     uint16_t stable_samples = 0;
     int stable_min_mv = 0;
     int stable_max_mv = 0;
+    uint32_t epoch = current_calibration_epoch();
+    unsigned save_attempts = 0;
 
     // USB 掉线即结束监测；回调为空也视为不可继续。
     while (usb_connected_callback != nullptr && usb_connected_callback()) {
@@ -321,8 +399,15 @@ void calibration_monitor_task(void*) {
             break;
         }
 
+        const uint32_t observed_epoch = current_calibration_epoch();
+        if (observed_epoch != epoch) {
+            epoch = observed_epoch;
+            stable_samples = 0; stable_min_mv = stable_max_mv = 0;
+            save_attempts = 0;
+        }
         int voltage_mv = 0;
         const esp_err_t result = read_mv(voltage_mv);
+        if (current_calibration_epoch() != epoch) continue;
         // 采样正忙说明本次周期无结果，跳过但不重置已有稳定窗口。
         if (result == ESP_ERR_INVALID_STATE) {
             continue;
@@ -332,7 +417,7 @@ void calibration_monitor_task(void*) {
             stable_samples = 0;
             stable_min_mv = 0;
             stable_max_mv = 0;
-            publish_calibration_window(0, 0, 0);
+            publish_calibration_window(0, 0, 0, epoch);
             continue;
         }
 
@@ -353,11 +438,11 @@ void calibration_monitor_task(void*) {
             stable_min_mv = voltage_mv;
             stable_max_mv = voltage_mv;
             publish_calibration_window(
-                stable_samples, stable_min_mv, stable_max_mv);
+                stable_samples, stable_min_mv, stable_max_mv, epoch);
             continue;
         }
         publish_calibration_window(
-            stable_samples, stable_min_mv, stable_max_mv);
+            stable_samples, stable_min_mv, stable_max_mv, epoch);
         // 窗口样本数未达标则继续下一轮采集。
         if (stable_samples < CALIBRATION_REQUIRED_SAMPLES) {
             continue;
@@ -379,7 +464,21 @@ void calibration_monitor_task(void*) {
         // 只有落在合理硬件范围内的结果才值得持久化，否则拒绝并告警。
         if (new_scale_q16 >= MIN_DIVIDER_SCALE_Q16 &&
             new_scale_q16 <= MAX_DIVIDER_SCALE_Q16) {
-            (void)save_calibration(new_scale_q16);
+            const esp_err_t saved = save_calibration(new_scale_q16, epoch);
+            if (saved != ESP_OK) {
+                xSemaphoreTake(state_mutex, portMAX_DELAY);
+                calibration_error = saved;
+                xSemaphoreGive(state_mutex);
+                ESP_LOGE(TAG, "calibration save failed: %s attempt=%u", esp_err_to_name(saved), save_attempts + 1);
+                if (saved == ESP_ERR_INVALID_STATE) continue;
+                // 最多三次写入；失败时不声明完成，每次重新采集完整稳定窗口。
+                if (++save_attempts < 3) {
+                    stable_samples = 0; stable_min_mv = stable_max_mv = 0;
+                    publish_calibration_window(0, 0, 0, epoch);
+                    continue;
+                }
+                break;
+            }
             ESP_LOGI(TAG,
                      "full-charge calibration complete: stable=%d mV scale_q16=%lu",
                      stable_voltage_mv,
@@ -436,7 +535,7 @@ esp_err_t enable_sample_path() {
 
 // 初始化采样模块：先确保分压关闭（默认低功耗），再初始化 ADC，读取
 // NVS 校准记录，最后创建同步原语。重复调用直接返回成功。
-esp_err_t init() {
+esp_err_t init(int64_t earliest_sample_us) {
     if (initialized) {
         return ESP_OK;
     }
@@ -458,91 +557,76 @@ esp_err_t init() {
                             ? record.divider_scale_q16
                             : DEFAULT_DIVIDER_SCALE_Q16;
 
-    // 状态互斥锁串行化共享读写；完成信号量用于通知采样结束。
     state_mutex = xSemaphoreCreateMutex();
-    completion = xSemaphoreCreateBinary();
-    if (state_mutex == nullptr || completion == nullptr) {
-        // 任一创建失败则回滚已创建的资源，避免句柄泄漏。
-        if (state_mutex != nullptr) {
-            vSemaphoreDelete(state_mutex);
-            state_mutex = nullptr;
+    sample_ready = xSemaphoreCreateBinary();
+    sample_idle = xSemaphoreCreateBinary();
+    bool resources_ok = state_mutex && sample_ready && sample_idle;
+    for (auto& slot : requests) {
+        slot.completion = xSemaphoreCreateBinary();
+        resources_ok = resources_ok && slot.completion;
+    }
+    if (resources_ok) {
+        xSemaphoreGive(sample_idle);
+        resources_ok = xTaskCreate(sampling_task, "battery_sample", 3072, nullptr, 3, &sample_worker) == pdPASS;
+    }
+    if (!resources_ok) {
+        for (auto& slot : requests) {
+            if (slot.completion) vSemaphoreDelete(slot.completion);
+            slot.completion = nullptr;
         }
-        if (completion != nullptr) {
-            vSemaphoreDelete(completion);
-            completion = nullptr;
-        }
+        if (state_mutex) vSemaphoreDelete(state_mutex);
+        if (sample_ready) vSemaphoreDelete(sample_ready);
+        if (sample_idle) vSemaphoreDelete(sample_idle);
+        state_mutex = sample_ready = sample_idle = nullptr;
         return ESP_ERR_NO_MEM;
     }
-
+    sample_not_before_us = earliest_sample_us;
     initialized = true;
     return ESP_OK;
 }
 
-// 发起一次异步采样：占用采样标志、登记回调、清零完成信号量，然后创建
-// 采样任务。同一时刻仅允许一次采样，重入返回 ESP_ERR_INVALID_STATE。
 esp_err_t start_async(CompletionCallback callback, void* context) {
-    if (!initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // 在锁内完成占用与登记，保证与 sampling_task 的状态更新不交叉。
-    xSemaphoreTake(state_mutex, portMAX_DELAY);
-    if (sampling) {
-        xSemaphoreGive(state_mutex);
-        return ESP_ERR_INVALID_STATE;
-    }
-    sampling = true;
-    last_result = ESP_ERR_INVALID_STATE;
-    completion_callback = callback;
-    completion_context = context;
-    // 消费可能残留的信号量，确保 wait_mv() 等待的是本次采样。
-    xSemaphoreTake(completion, 0);
-    xSemaphoreGive(state_mutex);
-
-    // 任务栈 3072 字节、优先级 3（高于校准任务的 2）。
-    if (xTaskCreate(sampling_task, "battery_sample", 3072, nullptr, 3, nullptr) != pdPASS) {
-        // 创建失败要撤销占用与回调登记，恢复可再次发起的状态。
-        xSemaphoreTake(state_mutex, portMAX_DELAY);
-        sampling = false;
-        completion_callback = nullptr;
-        completion_context = nullptr;
-        xSemaphoreGive(state_mutex);
-        return ESP_ERR_NO_MEM;
-    }
-    return ESP_OK;
+    return submit_sample(callback, context);
 }
 
-// 等待当前采样完成并取回结果。若此刻没有采样在跑，直接返回最近一次结果，
-// 从而实现“等待者”和“事后查询者”两种用法。
 esp_err_t wait_mv(int& voltage_mv, TickType_t ticks_to_wait) {
-    if (!initialized) {
-        return ESP_ERR_INVALID_STATE;
-    }
-
-    // 先判断是否真有采样在进行，避免在没有采样时无谓地阻塞。
+    if (!initialized) return ESP_ERR_INVALID_STATE;
     xSemaphoreTake(state_mutex, portMAX_DELAY);
-    const bool currently_sampling = sampling;
-    if (!currently_sampling) {
-        voltage_mv = last_voltage_mv;
-        const esp_err_t result = last_result;
-        xSemaphoreGive(state_mutex);
-        return result;
+    SampleRequest* request = latest_request;
+    if (request) ++request->references;
+    xSemaphoreGive(state_mutex);
+    return request ? await_sample(request, voltage_mv, ticks_to_wait) : ESP_ERR_INVALID_STATE;
+}
+
+bool prepare_sleep(TickType_t wait) {
+    if (!initialized) return true;
+    // 先关门再等待，避免 is_busy() 检查后又有新采样进入。
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    sleep_paused = true;
+    ++calibration_epoch;
+    xSemaphoreGive(state_mutex);
+    const bool idle = xSemaphoreTake(sample_idle, wait) == pdTRUE;
+    if (idle) xSemaphoreGive(sample_idle);
+    return idle;
+}
+
+void cancel_sleep() {
+    if (!initialized) return;
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    sleep_paused = false;
+    xSemaphoreGive(state_mutex);
+}
+
+void notify_external_power(bool connected) {
+    if (!initialized) return;
+    xSemaphoreTake(state_mutex, portMAX_DELAY);
+    if (external_power != connected) {
+        external_power = connected;
+        ++calibration_epoch;
+        calibration_stable_samples = 0;
+        calibration_min_mv = calibration_max_mv = 0;
     }
     xSemaphoreGive(state_mutex);
-
-    // 阻塞等待采样任务释放完成信号量；超时直接返回。
-    if (xSemaphoreTake(completion, ticks_to_wait) != pdTRUE) {
-        return ESP_ERR_TIMEOUT;
-    }
-    // 二值信号量在读取后放回，使多个后续查询者都能取得最近一次采样结果。
-    xSemaphoreGive(completion);
-
-    // 在锁内拷贝结果，避免与下一次采样的写入产生数据竞争。
-    xSemaphoreTake(state_mutex, portMAX_DELAY);
-    voltage_mv = last_voltage_mv;
-    const esp_err_t result = last_result;
-    xSemaphoreGive(state_mutex);
-    return result;
 }
 
 // 查询是否有采样任务在运行；未初始化时视为空闲。
@@ -558,11 +642,9 @@ bool is_busy() {
 
 // 同步读取便捷接口：发起异步采样后阻塞等待其结果返回给调用者。
 esp_err_t read_mv(int& voltage_mv) {
-    const esp_err_t start_result = start_async();
-    if (start_result != ESP_OK) {
-        return start_result;
-    }
-    return wait_mv(voltage_mv);
+    SampleRequest* request = nullptr;
+    const esp_err_t start_result = submit_sample(nullptr, nullptr, &request);
+    return start_result == ESP_OK ? await_sample(request, voltage_mv, portMAX_DELAY) : start_result;
 }
 
 // 启动 USB 满电自动校准监测。要求模块已初始化且回调非空，重复启动返回
@@ -573,7 +655,7 @@ esp_err_t start_calibration_monitor(UsbConnectedCallback usb_connected) {
     }
     // 在锁内检查并置位运行标志，防止并发重复启动。
     xSemaphoreTake(state_mutex, portMAX_DELAY);
-    if (calibration_monitor_running) {
+    if (calibration_monitor_running || sleep_paused) {
         xSemaphoreGive(state_mutex);
         return ESP_ERR_INVALID_STATE;
     }
@@ -610,6 +692,8 @@ void get_calibration_status(CalibrationStatus& status) {
         .stable_sample_count = calibration_stable_samples,
         .stable_min_mv = calibration_min_mv,
         .stable_max_mv = calibration_max_mv,
+        .last_error = calibration_error,
+        .generation = calibration_epoch,
     };
     xSemaphoreGive(state_mutex);
 }
@@ -628,6 +712,8 @@ esp_err_t reset_calibration() {
     }
     divider_scale_q16 = DEFAULT_DIVIDER_SCALE_Q16;
     stored_calibration_valid = false;
+    ++calibration_epoch;
+    calibration_error = ESP_OK;
     calibration_stable_samples = 0;
     calibration_min_mv = 0;
     calibration_max_mv = 0;

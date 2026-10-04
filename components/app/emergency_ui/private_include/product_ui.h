@@ -4,9 +4,10 @@
  */
 #pragma once
 #include "product_pages.h"
-#include "emergency_remote.h"
+#include "remote_snapshot.h"
 #include "ui_policy.h"
 #include "meter_format.h"
+#include <cmath>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -89,8 +90,9 @@ inline void render_rail(uint8_t* frame, const EmergencyRemote::Snapshot& s, int 
 // 绘制主页：以背景为底，依次显示电压、电流、功率三项；离线或断连时统一显示占位符。
 inline void render_home(uint8_t* frame, const EmergencyRemote::Snapshot& s) {
     std::memcpy(frame, kProductHome[0], 1024);
-    const double values[] = {s.data.voltage_mv / 1000.0, s.data.current_ua / 1000000.0,
-                            s.data.voltage_mv * (s.data.current_ua / 1e9)};
+    // 电流仅显示幅值；先换算为浮点数再取绝对值，避免最小有符号整数取反溢出。
+    const double values[] = {s.data.voltage_mv / 1000.0, std::abs(s.data.current_ua / 1000000.0),
+                            s.data.voltage_mv * std::abs(s.data.current_ua / 1e9)};
     for (int row = 0; row < 3; ++row) {
         char text[16];
         if (!s.online || s.connection_failed) std::strcpy(text, "--.--");

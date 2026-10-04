@@ -4,7 +4,9 @@
  */
 #include "power_manager.h"
 #include "hardware.h"
-#include "battery_level.h"
+#include "battery_status.h"
+#include "battery_voltage.h"
+#include "app_diagnostics.h"
 #include "emergency_remote.h"
 #include "runtime_settings.h"
 #include "blackbox.h"
@@ -48,7 +50,7 @@ void init_idle(int64_t now_us) {
 void note_activity(int64_t now_us) { activity_at = now_us; }
 // 计算静置截止时间（取活动时间与提醒截止的较晚者），并在允许且无阻塞时推进倒计时。
 SleepPlan plan(int64_t now_us, int64_t notice_deadline, bool notice_allowed, bool failed) {
-    int64_t deadline = activity_at + RuntimeSettings::get("idle_ms") * 1000LL;
+    int64_t deadline = activity_at + RuntimeSettings::get(RuntimeSettings::Id::IdleMs) * 1000LL;
     if (notice_deadline > deadline)
         deadline = notice_deadline;
     // always_on 模式默认禁止睡眠，仅在 failed 兜底时才允许；同时必须不存在任何睡眠阻塞。
@@ -68,9 +70,10 @@ SleepPlan plan(int64_t now_us, int64_t notice_deadline, bool notice_allowed, boo
 // USB=检测到外部供电；输出=输出接通或状态新鲜但未知；忙=遥控事务/配对中；按钮=按键按下。
 SleepBlock block() {
     const auto s = EmergencyRemote::snapshot();
-    return sleep_block(gpio_get_level(kVbusDetect), s.output_on,
-                       s.connection_failed || (s.output_time_us > 0 && esp_timer_get_time() - s.output_time_us <
-                                                                           RuntimeSettings::get("fresh_ms") * 1000LL),
+    const bool confirmed_fresh = s.output_confirmed && s.output_time_us > 0 &&
+        esp_timer_get_time() - s.output_time_us < RuntimeSettings::get(RuntimeSettings::Id::FreshMs) * 1000LL;
+    return sleep_block(gpio_get_level(kVbusDetect), s.output_on && !s.stop_timed_out,
+                       s.stop_timed_out || confirmed_fresh,
                        s.busy || s.pairing, gpio_get_level(kUiButton) == 0);
 }
 
@@ -78,7 +81,7 @@ SleepBlock block() {
 // -> 同步黑匣子 -> 隔离 GPIO/USB -> 安全复查 -> 触发深睡；任一环节被唤醒或复核失败则中止并恢复。
 int enter_sleep(const DisplayHooks &display, bool manual) {
     BatteryLevel::Status battery = {};
-    (void)BatteryLevel::get_status(battery);
+    (void)BatteryStatus::get_status(battery);
     // 先做一次快速阻塞判定，避免无谓地走完整流程。
     auto reason = block();
     DEVICE_EVENT_I(kEventTag, "sleep request source=%s block=%u battery_mv=%d soc=%d", manual ? "manual" : "idle",
@@ -91,6 +94,16 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
         DEVICE_EVENT_I(kEventTag, "sleep denied: remote not quiesced");
         return 4;
     }
+    if (!BatteryVoltage::prepare_sleep()) {
+        BatteryVoltage::cancel_sleep();
+        EmergencyRemote::cancel_sleep();
+        DEVICE_EVENT_I(kEventTag, "sleep denied: battery not quiesced");
+        return 4;
+    }
+    // 静止后再取得最后完成的读数，避免睡前样本仍留在协调器邮箱中未消费。
+    int last_voltage_mv = 0;
+    if (BatteryVoltage::wait_mv(last_voltage_mv, 0) == ESP_OK)
+        battery = BatteryStatus::update(last_voltage_mv, Hardware::usb_connected());
     // 记录入睡时的急停触点状态，唤醒时将据此判断是“闭合”还是“释放”边沿。
     const bool contact_low = gpio_get_level(kStopButton) == 0;
     esp_sleep_disable_wakeup_source(ESP_SLEEP_WAKEUP_ALL);
@@ -104,15 +117,24 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
     if (err != ESP_OK) {
         ESP_LOGE(TAG, "sleep wake configuration failed: %s", esp_err_to_name(err));
         EmergencyRemote::cancel_sleep();
+        BatteryVoltage::cancel_sleep();
         return 7;
     }
     // 先关闭显示，降低睡眠过程中的功耗与干扰，再同步黑匣子。
     display.prepare();
-    display.shutdown();
+    if (!display.shutdown()) {
+        EmergencyRemote::cancel_sleep();
+        BatteryVoltage::cancel_sleep();
+        display.restore();
+        DEVICE_EVENT_I(kEventTag, "sleep denied: display not quiesced");
+        return 4;
+    }
     if (Blackbox::is_enabled()) {
         DEVICE_EVENT_I(kEventTag, "deep sleep entry source=%s battery_mv=%d soc=%d contact_low=%u wake=GPIO3/4/5",
                        manual ? "manual" : "idle", battery.voltage_mv,
                        static_cast<int>(battery.displayed_percent), contact_low);
+        if (!AppDiagnostics::flush())
+            ESP_LOGW(TAG, "app diagnostics flush timed out");
         const auto sync_err = BlackboxService::sync();
         if (sync_err != ESP_OK)
             ESP_LOGW(TAG, "Blackbox sleep sync failed: %s", esp_err_to_name(sync_err));
@@ -129,6 +151,7 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
         DEVICE_EVENT_I(kEventTag, "sleep aborted before entry block=%u contact_changed=%u",
                        static_cast<unsigned>(reason), contact_low != (gpio_get_level(kStopButton) == 0));
         EmergencyRemote::cancel_sleep();
+        BatteryVoltage::cancel_sleep();
         Hardware::screen_power(true);
         vTaskDelay(pdMS_TO_TICKS(100));
         display.restore();
@@ -153,6 +176,7 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
     restore_usb_after_sleep_abort();
     Hardware::restore_screen_pin();
     EmergencyRemote::cancel_sleep();
+    BatteryVoltage::cancel_sleep();
     Hardware::screen_power(true);
     vTaskDelay(pdMS_TO_TICKS(100));
     display.restore();

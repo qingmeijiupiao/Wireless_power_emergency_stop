@@ -6,8 +6,9 @@
 idf_component_register(
     SRCS "src/shell_command.cpp"
     INCLUDE_DIRS "include"
-    REQUIRES
-        battery_level
+    REQUIRES esp_common
+    PRIV_REQUIRES
+        app_diagnostics
         battery_voltage
         blackbox
         blackbox_service

@@ -28,17 +28,13 @@ dependencies:
     path: components/bsp/shell
     version: *wireless_power_components_version
   circular_flash_buffer:
-    git: *wireless_power_components_repo
-    path: components/bsp/circular_flash_buffer
-    version: *wireless_power_components_version
+    override_path: ../components/overrides/circular_flash_buffer
   Interp:
     git: *wireless_power_components_repo
     path: components/common/Interp
     version: *wireless_power_components_version
   blackbox:
-    git: *wireless_power_components_repo
-    path: components/middleware/blackbox
-    version: *wireless_power_components_version
+    override_path: ../components/overrides/blackbox
   battery_level:
     git: *wireless_power_components_repo
     path: components/middleware/battery_level
@@ -48,9 +44,7 @@ dependencies:
     path: components/middleware/blackbox_service
     version: *wireless_power_components_version
   espnow_link:
-    git: *wireless_power_components_repo
-    path: components/middleware/espnow_link
-    version: *wireless_power_components_version
+    override_path: ../components/overrides/espnow_link
   espnow_service_proto:
     git: *wireless_power_components_repo
     path: components/product/espnow_service_proto

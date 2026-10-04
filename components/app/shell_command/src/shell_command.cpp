@@ -8,6 +8,7 @@
  * - 输出文本保持 ASCII 英文，便于串口工具与上位机稳定解析。
  */
 #include "shell_command.h"
+#include "app_diagnostics.h"
 
 #include <climits>
 #include <cstdint>
@@ -15,7 +16,7 @@
 #include <cstdlib>
 #include <cstring>
 
-#include "battery_level.h"
+#include "battery_status.h"
 #include "battery_voltage.h"
 #include "blackbox.h"
 #include "blackbox_service.h"
@@ -102,7 +103,7 @@ esp_err_t init() {
                 return ret == ESP_OK ? 0 : 1;
             }
             if (!strcmp(action, "reset-level")) {
-                BatteryLevel::reset();
+                BatteryStatus::reset();
                 printf("battery RTC level reset\n");
                 return 0;
             }
@@ -115,7 +116,7 @@ esp_err_t init() {
             const esp_err_t ret = BatteryVoltage::read_mv(voltage_mv);
             if (ret == ESP_OK) {
                 const BatteryLevel::Status level =
-                    BatteryLevel::update(voltage_mv, Hardware::usb_connected());
+                    BatteryStatus::update(voltage_mv, Hardware::usb_connected());
                 printf("battery voltage=%d mV estimated=%u%% displayed=%u%% "
                        "charging=%u rtc_restored=%u\n",
                        voltage_mv,
@@ -130,14 +131,16 @@ esp_err_t init() {
             BatteryVoltage::CalibrationStatus calibration = {};
             BatteryVoltage::get_calibration_status(calibration);
             printf("calibration scale_q16=%lu scale=%.6f stored=%u "
-                   "monitor=%u stable=%u/60 range=%d..%d mV\n",
+                   "monitor=%u stable=%u/60 range=%d..%d mV generation=%lu save_error=%s\n",
                    static_cast<unsigned long>(calibration.divider_scale_q16),
                    calibration.divider_scale_q16 / 65536.0,
                    calibration.stored_calibration_valid ? 1U : 0U,
                    calibration.monitor_running ? 1U : 0U,
                    static_cast<unsigned>(calibration.stable_sample_count),
                    calibration.stable_min_mv,
-                   calibration.stable_max_mv);
+                   calibration.stable_max_mv,
+                   static_cast<unsigned long>(calibration.generation),
+                   esp_err_to_name(calibration.last_error));
             return ret == ESP_OK ? 0 : 1;
         }));
 
@@ -189,9 +192,9 @@ esp_err_t init() {
             const char* action = argc > 1 ? argv[1] : "status";
             if (!strcmp(action, "status")) {
                 const auto s = EmergencyRemote::snapshot();
-                printf("REMOTE state=%u paired=%u online=%u stop=%u output=%u protect=%u "
+                printf("REMOTE state=%u paired=%u online=%u stop=%u output=%u confirmed=%u close_timeout=%u protect=%u "
                        "voltage_mv=%u current_ua=%ld\n",
-                       static_cast<unsigned>(s.state), s.paired, s.online, s.stop_closed, s.output_on,
+                       static_cast<unsigned>(s.state), s.paired, s.online, s.stop_closed, s.output_on, s.output_confirmed, s.stop_timed_out,
                        s.protection_mask, s.data.voltage_mv, static_cast<long>(s.data.current_ua));
                 printf("RUNTIME usb=%d always_on=%u busy=%u pairing=%u sleep_block=%u\n",
                        Hardware::usb_connected(), RuntimeSettings::always_on(), s.busy, s.pairing,
@@ -270,14 +273,16 @@ esp_err_t init() {
                 BlackboxService::Statistics statistics = {};
                 BlackboxService::get_statistics(&statistics);
                 printf("Blackbox status: enabled=%d records=%lu/%lu "
-                       "captured=%lu pending=%u dropped=%lu persist_failures=%lu\n",
+                       "captured=%lu pending=%u dropped=%lu persist_failures=%lu async_log_dropped=%lu gestures_dropped=%lu\n",
                        Blackbox::is_enabled(),
                        static_cast<unsigned long>(Blackbox::count()),
                        static_cast<unsigned long>(Blackbox::capacity()),
                        static_cast<unsigned long>(statistics.captured_logs),
                        static_cast<unsigned>(statistics.pending_logs),
                        static_cast<unsigned long>(statistics.dropped_logs),
-                       static_cast<unsigned long>(statistics.persist_failures));
+                       static_cast<unsigned long>(statistics.persist_failures),
+                       static_cast<unsigned long>(AppDiagnostics::dropped()),
+                       static_cast<unsigned long>(EmergencyUi::dropped_gestures()));
                 printf("Chip uptime_ms=%llu heap_free=%lu heap_min=%lu\n",
                        static_cast<unsigned long long>(esp_timer_get_time() / 1000),
                        static_cast<unsigned long>(esp_get_free_heap_size()),
@@ -349,13 +354,19 @@ esp_err_t init() {
                 }
 
                 // 读取前先冲刷待持久化日志，确保 dump 反映已落盘内容。
+                if (!AppDiagnostics::flush()) {
+                    printf("App diagnostics flush timed out\n");
+                    return 1;
+                }
                 const esp_err_t sync_result = BlackboxService::sync();
                 if (sync_result != ESP_OK) {
                     printf("Blackbox sync failed: %s\n", esp_err_to_name(sync_result));
                     return 1;
                 }
 
-                const uint32_t raw_count = Blackbox::count();
+                const auto view = Blackbox::snapshot();
+                const uint32_t raw_count = view.count;
+                bool overwritten = false;
                 printf("BLACKBOX_DUMP_BEGIN persisted_records=%lu limit=%s order=newest_first\n",
                        static_cast<unsigned long>(raw_count),
                        limit_label);
@@ -364,8 +375,19 @@ esp_err_t init() {
                 // 文本事件可能横跨多条底层记录，record_count 指示步进长度；
                 // 无效记录单独标记并逐条前进，避免死循环。
                 while (index < raw_count && emitted < limit) {
-                    const Blackbox::Record record = Blackbox::read(index);
-                    const Blackbox::TextRecord text = Blackbox::read_text(index);
+                    Blackbox::Record record{};
+                    Blackbox::TextRecord text{};
+                    const auto read_error = Blackbox::read_entry(view, index, record, text);
+                    if (read_error == ESP_ERR_INVALID_STATE) {
+                        printf("BLACKBOX_DUMP_ABORT snapshot overwritten or erased\n");
+                        overwritten = true;
+                        break;
+                    }
+                    if (read_error != ESP_OK && read_error != ESP_ERR_INVALID_CRC) {
+                        printf("BLACKBOX_DUMP_ABORT read=%s\n", esp_err_to_name(read_error));
+                        overwritten = true;
+                        break;
+                    }
                     if (text.record_count != 0) {
                         printf("r=%lu t_ms=%lu n=%u ",
                                static_cast<unsigned long>(index),
@@ -385,7 +407,7 @@ esp_err_t init() {
                        static_cast<unsigned long>(emitted),
                        static_cast<unsigned long>(index),
                        static_cast<unsigned long>(raw_count - index));
-                return 0;
+                return overwritten ? 1 : 0;
             }
 
             printf("Usage: blackbox [status|dump [count|all]|pull [count|all]|clear|mark <text>]\n");

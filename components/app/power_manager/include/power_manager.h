@@ -8,7 +8,7 @@ namespace PowerManager {
 // 显示相关回调，由上层注入：深睡前 prepare/shutdown，睡眠中止后 restore。
 struct DisplayHooks {
     void (*prepare)();
-    void (*shutdown)();
+    bool (*shutdown)(); /**< true 表示显示执行任务已释放总线，可隔离 GPIO。 */
     void (*restore)();
 };
 /** 调用时机：GPIO 初始化之后、无线初始化启动前；消耗 RTC 睡眠标记判断是否由触点释放唤醒。 */

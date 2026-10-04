@@ -1,0 +1,8 @@
+menu "ESP-NOW reliable link"
+    config ESPNOW_LINK_TASK_STACK_SIZE
+        int "Link task stack size in bytes"
+        range 4096 32768
+        default 4096
+        help
+            Remote button products use 5120 bytes for response/log callbacks.
+endmenu
