@@ -3,6 +3,7 @@
  * @brief UI 业务动作落地：参数持久化、连接重试、配对入口检查和休眠意图转交。
  */
 #include "input_actions.h"
+#include "app_diagnostics.h"
 
 #include "emergency_remote.h"
 #include "hardware.h"
@@ -31,8 +32,10 @@ bool pairing_allowed(const EmergencyRemote::Snapshot &remote, int64_t now_us) {
 bool dispatch_input(const EmergencyUi::Update &update, int64_t now_us) {
     if (update.activity)
         PowerManager::note_activity(now_us);
-    if (update.retry)
+    if (update.retry) {
+        APP_LOGI("ProductEvent", "connection retry source=ui result=submitted");
         EmergencyRemote::retry_connection();
+    }
 
     using EmergencyUi::Action;
     using namespace UiMessages;
@@ -40,7 +43,7 @@ bool dispatch_input(const EmergencyUi::Update &update, int64_t now_us) {
     case Action::None:
         break;
     case Action::AlwaysOn: {
-        const bool saved = RuntimeSettings::set_always_on(!RuntimeSettings::always_on());
+        const bool saved = RuntimeSettings::set_always_on(!RuntimeSettings::always_on(), "ui");
         EmergencyUi::show_message(saved ? kAlwaysOnSaved : kSaveFailed, now_us);
         break;
     }
@@ -49,7 +52,7 @@ bool dispatch_input(const EmergencyUi::Update &update, int64_t now_us) {
             sizeof(RuntimeSettings::kSleepTimesMs) / sizeof(RuntimeSettings::kSleepTimesMs[0]);
         // 在索引数组前校验 UI 选择，非法值统一反馈保存失败。
         const bool saved = update.sleep_choice >= 0 && update.sleep_choice < choice_count &&
-                           RuntimeSettings::set(RuntimeSettings::Id::IdleMs, RuntimeSettings::kSleepTimesMs[update.sleep_choice]);
+                           RuntimeSettings::set(RuntimeSettings::Id::IdleMs, RuntimeSettings::kSleepTimesMs[update.sleep_choice], "ui");
         EmergencyUi::show_message(saved ? kSleepTimeSaved : kSaveFailed, now_us);
         break;
     }
@@ -59,9 +62,11 @@ bool dispatch_input(const EmergencyUi::Update &update, int64_t now_us) {
     case Action::Pair:
     case Action::Repair:
         if (pairing_allowed(EmergencyRemote::snapshot(), now_us)) {
+            APP_LOGI("ProductEvent", "pairing source=ui action=%s result=submitted", update.action == Action::Repair ? "repair" : "pair");
             EmergencyRemote::start_pairing(update.action == Action::Repair);
             EmergencyUi::show_message(kPairStarted, now_us);
         } else {
+            APP_LOGI("ProductEvent", "pairing source=ui result=denied reason=unsafe_output_or_pending");
             EmergencyUi::show_message(kPairBlocked, now_us);
         }
         break;

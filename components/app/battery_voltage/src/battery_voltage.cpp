@@ -11,6 +11,7 @@
 // - esp_log.h：校准结果日志输出
 // - freertos 头文件：互斥锁、二值信号量与后台任务
 #include "battery_voltage.h"
+#include "app_diagnostics.h"
 
 #include <algorithm>
 
@@ -368,13 +369,17 @@ esp_err_t save_calibration(uint32_t new_scale_q16, uint32_t epoch) {
     }
     const esp_err_t persist_result = stored_calibration.set(record);
     if (persist_result != ESP_OK) {
+        APP_LOGI("ProductEvent", "battery calibration save result=%s", esp_err_to_name(persist_result));
         xSemaphoreGive(state_mutex);
         return persist_result;
     }
+    const uint32_t previous = divider_scale_q16;
     divider_scale_q16 = new_scale_q16;
     stored_calibration_valid = true;
     ++calibration_epoch;
     calibration_error = ESP_OK;
+    APP_LOGI("ProductEvent", "battery calibration source=auto result=saved old_scale_q16=%lu new_scale_q16=%lu",
+             static_cast<unsigned long>(previous), static_cast<unsigned long>(new_scale_q16));
     xSemaphoreGive(state_mutex);
     return ESP_OK;
 }
@@ -385,11 +390,13 @@ esp_err_t save_calibration(uint32_t new_scale_q16, uint32_t epoch) {
 // 电压已稳定在 4.2 V 参考电压，据此反推并保存新的分压倍率。每个 USB 插入
 // 周期成功保存后退出；失败最多重采完整窗口并尝试三次。
 void calibration_monitor_task(void*) {
+    APP_LOGI("ProductEvent", "battery calibration source=usb result=monitoring");
     uint16_t stable_samples = 0;
     int stable_min_mv = 0;
     int stable_max_mv = 0;
     uint32_t epoch = current_calibration_epoch();
     unsigned save_attempts = 0;
+    const char* finish_reason = "usb_removed"; // 生命周期事件说明终止原因，不用于校准控制。
 
     // USB 掉线即结束监测；回调为空也视为不可继续。
     while (usb_connected_callback != nullptr && usb_connected_callback()) {
@@ -477,13 +484,16 @@ void calibration_monitor_task(void*) {
                     publish_calibration_window(0, 0, 0, epoch);
                     continue;
                 }
+                finish_reason = "save_failed";
                 break;
             }
-            ESP_LOGI(TAG,
+            APP_LOGI("ProductEvent",
                      "full-charge calibration complete: stable=%d mV scale_q16=%lu",
                      stable_voltage_mv,
                      static_cast<unsigned long>(new_scale_q16));
+            finish_reason = "saved";
         } else {
+            finish_reason = "out_of_range";
             ESP_LOGW(TAG,
                      "calibration result out of range: stable=%d mV scale_q16=%lu",
                      stable_voltage_mv,
@@ -495,6 +505,8 @@ void calibration_monitor_task(void*) {
 
     // 退出前清理运行标志与对外可见的窗口状态，避免残留过期进度。
     xSemaphoreTake(state_mutex, portMAX_DELAY);
+    APP_LOGI("ProductEvent", "battery calibration monitor stopped reason=%s samples=%u failed_saves=%u",
+             finish_reason, stable_samples, save_attempts);
     calibration_monitor_running = false;
     calibration_stable_samples = 0;
     calibration_min_mv = 0;
@@ -700,16 +712,19 @@ void get_calibration_status(CalibrationStatus& status) {
 
 // 恢复默认分压倍率：持久化一条校验无效的默认记录，同时刷新运行时倍率与
 // 状态。记录保留默认魔数与版本，仅靠校验失败来表达“未校准”。
-esp_err_t reset_calibration() {
+esp_err_t reset_calibration(const char* source) {
+    source = source ? source : "unknown";
     CalibrationRecord record = DEFAULT_CALIBRATION;
     // 写入无效校验值表示显式恢复出厂倍率，重启后仍显示为“未校准”。
     record.checksum = 0;
     xSemaphoreTake(state_mutex, portMAX_DELAY);
     const esp_err_t persist_result = stored_calibration.set(record);
     if (persist_result != ESP_OK) {
+        APP_LOGI("ProductEvent", "battery calibration reset source=%s result=%s", source, esp_err_to_name(persist_result));
         xSemaphoreGive(state_mutex);
         return persist_result;
     }
+    const uint32_t previous = divider_scale_q16;
     divider_scale_q16 = DEFAULT_DIVIDER_SCALE_Q16;
     stored_calibration_valid = false;
     ++calibration_epoch;
@@ -717,6 +732,8 @@ esp_err_t reset_calibration() {
     calibration_stable_samples = 0;
     calibration_min_mv = 0;
     calibration_max_mv = 0;
+    APP_LOGI("ProductEvent", "battery calibration reset source=%s result=saved old_scale_q16=%lu new_scale_q16=%lu",
+             source, static_cast<unsigned long>(previous), static_cast<unsigned long>(divider_scale_q16));
     xSemaphoreGive(state_mutex);
     return ESP_OK;
 }

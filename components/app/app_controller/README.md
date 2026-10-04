@@ -14,6 +14,7 @@ app_controller/
     input_actions.h              UI 动作执行接口
     sleep_coordinator.h          待处理手动休眠请求
     event_recorder.h             状态日志去重基准
+    runtime_diagnostics.h        周期实时状态与资源摘要
     ui_messages.h                ProductUi 消息页编号的命名常量
   src/                           协调任务与各功能模块实现
   CMakeLists.txt                 源文件、公开接口与私有组件依赖声明
@@ -25,7 +26,8 @@ app_controller/
 | `battery_monitor.cpp` | 采样结果邮箱、周期采样、首次失败重试、USB 插拔、校准启动、电量上报 |
 | `input_actions.cpp` | 将 UI 动作转换为设置写入、连接重试、配对请求或手动休眠请求 |
 | `sleep_coordinator.cpp` | 等待按键释放、协调手动/自动休眠以及显示钩子 |
-| `event_recorder.cpp` | 记录在线、输出、保护与配对状态变化，独立维护日志去重基准 |
+| `event_recorder.cpp` | 记录在线、配对与保存节点/MAC/信道变化，独立维护日志去重基准 |
+| `runtime_diagnostics.cpp` | 每秒输出实时运行摘要，每十秒输出资源及日志丢失统计，使用普通 INFO |
 
 ## 启动接口与生命周期
 
@@ -131,6 +133,11 @@ ESP_ERROR_CHECK(AppController::start());
 新增提示编号时在 `ui_messages.h` 中命名，并核对 `ProductUi` 的图像索引。新增后台结果
 来源时应明确队列载荷、对象生命周期、消费者任务与是否计为活动；不要让后台回调直接
 更新页面状态。若需拆出新的执行任务，先明确该任务的状态所有权与和休眠流程的同步方式。
+
+控制状态变化、输出确认和保护原因在 `EmergencyRemote` 状态所有者处记录，避免 UI 采样漏掉
+短暂状态；UI 仅记录按键、菜单及故障提示/确认事件。日志与模型仍保留有符号原始电流，
+只有屏幕渲染取绝对值。周期摘要不会刷新活动/静置时刻，也不会进入黑匣子 INFO 白名单。
+日志规则、字段和持久化边界见 [app_diagnostics](../app_diagnostics/README.md)。
 
 ## 验证入口
 

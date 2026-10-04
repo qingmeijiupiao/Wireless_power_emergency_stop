@@ -7,6 +7,18 @@
 namespace PowerManager {
 // 睡眠阻塞原因，按优先级从高到低排列；None 表示当前允许进入深睡。
 enum class SleepBlock { None, Usb, OutputOn, Unknown, Busy, Button };
+/** @brief 休眠阻塞的稳定名称，供实时状态和操作事件回溯使用。 */
+inline const char* sleep_block_name(SleepBlock block) {
+    switch (block) {
+    case SleepBlock::None: return "none";
+    case SleepBlock::Usb: return "usb";
+    case SleepBlock::OutputOn: return "output_on";
+    case SleepBlock::Unknown: return "output_unknown";
+    case SleepBlock::Busy: return "busy";
+    case SleepBlock::Button: return "button_held";
+    default: return "unknown";
+    }
+}
 // 纯函数：按固定优先级判断当前是否被阻塞。USB 接入优先于输出，输出优先于状态未知，
 // 状态未知优先于忙，最后是按钮按下；返回 None 才允许进入深睡。
 inline SleepBlock sleep_block(bool usb, bool output_on, bool known, bool busy, bool button) {

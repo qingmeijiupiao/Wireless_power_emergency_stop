@@ -1,2 +1,0 @@
-#pragma once
-#define CONFIG_ESPNOW_LINK_TASK_STACK_SIZE 4096

@@ -128,12 +128,54 @@ State refusal_state(const Response &rsp) {
         return rsp.result == EspNowService::SwitchResult::NOT_READY ? State::NOT_READY : State::REJECTED;
     }
 }
+/** @brief 原因由远端应答提供；没有详细应答时明确标为 unknown。 */
+const char* reason_name(uint8_t reason) {
+    switch (reason) {
+    case 0: return "none";
+    case 1: return "short_fault";
+    case 2: return "protection";
+    case 3: return "cooldown";
+    case 4: return "busy";
+    case 6: return "not_ready";
+    case 7: return "detect_error";
+    case 10: return "unknown";
+    default: return "other";
+    }
+}
+/** 一次操作跨多个报文重试使用同一编号；这些字段仅用于记录，不驱动控制策略。 */
+struct OperationLog {
+    uint32_t number = 0, attempts = 0;
+    int64_t started_us = 0;
+    uint8_t reason = 255, result = 255;
+    bool finished = true;
+};
+/** @brief 建立操作日志上下文，并明确记录未完成操作被新请求替代。 */
+void begin_operation(OperationLog& operation, uint32_t& serial, const char* action, const char* source, int64_t now) {
+    if (!operation.finished)
+        APP_LOGI(kEventTag, "operation op=%lu action=%s result=superseded attempts=%lu",
+                 static_cast<unsigned long>(operation.number), action, static_cast<unsigned long>(operation.attempts));
+    operation = {++serial, 0, now, 255, 255, false};
+    APP_LOGI(kEventTag, "operation op=%lu action=%s source=%s result=requested",
+             static_cast<unsigned long>(operation.number), action, source);
+}
+/** @brief 操作结束记录；总超时与应答成功使用不同结果名称，不能混淆关闭确认。 */
+void finish_operation(OperationLog& operation, const char* action, const char* result, int64_t now) {
+    if (operation.finished) return;
+    APP_LOGI(kEventTag, "operation op=%lu action=%s result=%s attempts=%lu elapsed_ms=%lld",
+             static_cast<unsigned long>(operation.number), action, result,
+             static_cast<unsigned long>(operation.attempts), static_cast<long long>((now - operation.started_us) / 1000));
+    operation.finished = true;
+}
 
 // 在临界区内更新对外状态。
-void set_state(State state) {
+void set_state(State state, const char* cause = "control") {
     portENTER_CRITICAL(&lock);
+    const State previous = model.state;
     model.state = state;
     portEXIT_CRITICAL(&lock);
+    // 在状态所有者处记录每次实际变化；不等待 UI 的下一次采样，且不在临界区输出。
+    if (previous != state)
+        APP_LOGI(kEventTag, "state %s -> %s cause=%s", state_name(previous), state_name(state), cause);
 }
 
 // 使已有的“静止”结论失效：出现新事件时禁止进入睡眠。
@@ -164,6 +206,13 @@ void worker(void *) {
     bool off_logged = false; // 同一轮 OFF 业务事件只记录一次，避免刷屏
     EspNowLink::LinkStatistics last_stats{};
     int64_t stats_at = 0;
+    uint32_t operation_serial = 0;
+    OperationLog off_operation, on_operation;
+    begin_operation(off_operation, operation_serial, "OFF", "boot_sync", connection_since);
+    AppDiagnostics::ErrorLog radio_log, submit_log, data_log, recovery_log, recovery_submit_log;
+    bool recovery_pending = false;
+    uint8_t protection_before = 0;
+    bool output_before = false, confirmed_before = false;
     while (true) {
         const int64_t now = esp_timer_get_time();
         const bool low = Hardware::stop_closed();
@@ -177,7 +226,7 @@ void worker(void *) {
             const uint32_t invalid = stats.rx_invalid_packets - last_stats.rx_invalid_packets;
             const uint32_t overflow = stats.rx_queue_overflows - last_stats.rx_queue_overflows;
             if (submit || mac || ack || invalid || overflow)
-                APP_LOGW(TAG,
+                APP_LOGI(TAG,
                          "ESPNOW delta submit=%lu mac=%lu ack_timeout=%lu rx_invalid=%lu rx_overflow=%lu",
                          static_cast<unsigned long>(submit), static_cast<unsigned long>(mac),
                          static_cast<unsigned long>(ack), static_cast<unsigned long>(invalid),
@@ -186,12 +235,14 @@ void worker(void *) {
             stats_at = now + 1000000;
         }
         if (wrong_channel_requested.exchange(false)) {
-            APP_LOGW(TAG, "TEST_WRONG_CHANNEL submit=%s", esp_err_to_name(WiFiManager::instance().set_channel(6)));
+            APP_LOGI(kEventTag, "channel test source=shell channel=6 result=%s", esp_err_to_name(WiFiManager::instance().set_channel(6)));
         }
         // 消费本拍到来的急停/停止/重试请求；exchange 保证每个事件只被处理一次。
         const bool fall = contact_fell.exchange(false);
         const bool stop = stop_requested.exchange(false);
         if (retry_requested.exchange(false)) {
+            finish_operation(on_operation, "ON", "cancelled_by_retry", now);
+            begin_operation(off_operation, operation_serial, "OFF", "user_retry", now);
             invalidate_sleep();
             failed = false;
             connection_since = now;
@@ -211,6 +262,8 @@ void worker(void *) {
         // 急停锁存：无论是 ISR 边沿、任务请求还是轮询首次发现的闭合，都强制进入 OFF
         // 事务并作废睡眠，同时清除尚未发送的 ON。
         if (stop || fall || (low && !was_low)) {
+            finish_operation(on_operation, "ON", "cancelled_by_stop", now);
+            begin_operation(off_operation, operation_serial, "OFF", stop ? "software_stop" : "stop_contact", now);
             invalidate_sleep();
             failed = false;
             connection_since = now;
@@ -224,7 +277,7 @@ void worker(void *) {
             pending = false;
             id = 0;
             retry_at = 0;
-            set_state(State::STOPPING);
+            set_state(State::STOPPING, stop ? "software_stop" : "stop_contact");
             APP_LOGI(kEventTag, "STOP latched contact=%d edge=%u requested=%u", low, fall, stop);
             off_logged = false;
         }
@@ -237,22 +290,31 @@ void worker(void *) {
             if (release_armed && now - high_since >= RuntimeSettings::get(RuntimeSettings::Id::ReleaseMs) * 1000LL) {
                 release_armed = false;
                 if (!failed) {
+                    begin_operation(on_operation, operation_serial, "ON", "stop_released", now);
                     on_after_off = true;
                     on_submit_until = now + RuntimeSettings::get(RuntimeSettings::Id::OnAckMs) * 1000LL;
                 }
                 APP_LOGI(TAG, "RELEASE_STABLE; ON waits for confirmed OFF");
-                APP_LOGI(kEventTag, "STOP released stable; ON queued after OFF confirmation");
+                APP_LOGI(kEventTag, "STOP released stable ON_queued=%u reason=%s", !failed,
+                         failed ? "connection_failed" : "wait_for_confirmed_OFF");
             }
         }
         was_low = low;
         // 诊断用 ON 请求：触点闭合或释放尚未稳定时一律忽略，防止越过安全约束。
-        if (on_requested.exchange(false) && !low && !release_armed) {
+        const bool on_request = on_requested.exchange(false);
+        if (on_request && (low || release_armed))
+            APP_LOGI(kEventTag, "ON source=shell result=denied reason=%s", low ? "stop_held" : "release_unstable");
+        if (on_request && !low && !release_armed) {
+            begin_operation(on_operation, operation_serial, "ON", "shell", now);
             invalidate_sleep();
             failed = false;
             connection_since = now;
             on_after_off = true;
             on_submit_until = now + RuntimeSettings::get(RuntimeSettings::Id::OnAckMs) * 1000LL;
-            if (!snapshot().output_confirmed) { off_required = true; off_since = now; }
+            if (!snapshot().output_confirmed) {
+                begin_operation(off_operation, operation_serial, "OFF", "before_unconfirmed_ON", now);
+                off_required = true; off_since = now;
+            }
             APP_LOGI(kEventTag, "ON requested");
         }
         // 链路未激活（例如掉线）时，按已保存节点的信道重新拉起 STA 无线。
@@ -260,9 +322,8 @@ void worker(void *) {
             EspNowLink::SavedPeer peer{};
             const uint8_t channel = EspNowLink::get_saved_peer(0, &peer) == ESP_OK ? peer.last_channel : 1;
             const auto err = WiFiManager::instance().start_sta_radio(channel);
-            if (err != ESP_OK)
-                APP_LOGE(TAG, "radio resume channel=%u: %s", channel, esp_err_to_name(err));
-            else
+            radio_log.observe(TAG, "radio resume", err);
+            if (err == ESP_OK)
                 APP_LOGI(kEventTag, "radio resumed channel=%u", channel);
         }
         // 配对请求：仅当无待办事务、未排队 ON、未在恢复信道/配对中，且当前输出安全时才受理。
@@ -274,6 +335,8 @@ void worker(void *) {
                                     now - status.output_time_us < RuntimeSettings::get(RuntimeSettings::Id::FreshMs) * 1000LL))) {
                 // 重新配对：先清空已保存节点及输出/数据时间戳，强制重新同步 OFF。
                 if (repair_requested.exchange(false)) {
+                    finish_operation(on_operation, "ON", "cancelled_by_pairing", now);
+                    begin_operation(off_operation, operation_serial, "OFF", "repair_sync", now);
                     APP_LOGI(kEventTag, "pairing: clear saved peers");
                     EspNowLink::SavedPeer old{};
                     while (EspNowLink::get_saved_peer(0, &old) == ESP_OK) {
@@ -341,14 +404,21 @@ void worker(void *) {
                 // 成功必须同时满足“结果 OK”且“输出状态与请求动作一致”。
                 const bool success = rsp.result == EspNowService::SwitchResult::OK &&
                                      rsp.output == (action == EspNowService::SwitchAction::ON);
+                auto& operation = action == EspNowService::SwitchAction::ON ? on_operation : off_operation;
                 if (success && first_response)
-                    APP_LOGI(kEventTag, "switch ACK id=%lu action=%u output=%u", static_cast<unsigned long>(id),
-                                   static_cast<unsigned>(action), rsp.output);
-                else if (!success)
-                    APP_LOGE(TAG,
-                             "switch refused id=%lu action=%u result=%u output=%u reason=%u protect=%u",
-                             static_cast<unsigned long>(id), static_cast<unsigned>(action),
-                             static_cast<unsigned>(rsp.result), rsp.output, rsp.reason, rsp.mask);
+                    APP_LOGI(kEventTag, "switch ACK op=%lu id=%lu action=%u output=%u confirmed=1",
+                             static_cast<unsigned long>(operation.number), static_cast<unsigned long>(id),
+                             static_cast<unsigned>(action), rsp.output);
+                if (!success && (operation.reason != rsp.reason || operation.result != static_cast<uint8_t>(rsp.result))) {
+                    APP_LOGI(kEventTag, "switch refused op=%lu id=%lu action=%u result=%u reason=%s(%u) protect=0x%x",
+                             static_cast<unsigned long>(operation.number), static_cast<unsigned long>(id),
+                             static_cast<unsigned>(action), static_cast<unsigned>(rsp.result),
+                             reason_name(rsp.reason), rsp.reason, rsp.mask);
+                    operation.reason = rsp.reason; operation.result = static_cast<uint8_t>(rsp.result);
+                }
+                if (success || action == EspNowService::SwitchAction::ON)
+                    finish_operation(operation, action == EspNowService::SwitchAction::ON ? "ON" : "OFF",
+                                     success ? "confirmed" : "refused", now);
                 APP_LOGI(TAG, "SWITCH_ACK id=%lu action=%u result=%u output=%u reason=%u protect=%u",
                          static_cast<unsigned long>(id), static_cast<unsigned>(action),
                          static_cast<unsigned>(rsp.result), rsp.output, rsp.reason, rsp.mask);
@@ -356,12 +426,12 @@ void worker(void *) {
                 if (action == EspNowService::SwitchAction::OFF) {
                     off_required = !success;
                     retry_at = success ? 0 : now + 100000;
-                    set_state(success ? State::OFF : State::OFFLINE);
+                    set_state(success ? State::OFF : State::OFFLINE, success ? "OFF_ack" : "OFF_refused");
                 } else if (!off_required) {
                     if (rsp.reason != 10 || success || first_response) {
                         const State result_state = success ? State::ON : refusal_state(rsp);
                         if (result_state == State::PROTECTED) protection_refused_at = now;
-                        set_state(result_state);
+                        set_state(result_state, success ? "ON_ack" : reason_name(rsp.reason));
                     }
                 }
             }
@@ -369,6 +439,9 @@ void worker(void *) {
         const auto before = snapshot();
         if (!failed && before.online) connection_since = now;
         if (now - connection_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL && !off_required) {
+            finish_operation(on_operation, "ON", "cancelled_by_link_loss", now);
+            begin_operation(off_operation, operation_serial, "OFF", "link_lost", now);
+            off_logged = false;
             // 失联时重新尝试关断，使用独立且固定的关断期限；不可无限延长。
             off_required = true;
             off_since = now;
@@ -379,6 +452,8 @@ void worker(void *) {
         }
         const bool stop_expired = off_required && now - off_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL;
         if (!failed && stop_expired) {
+            finish_operation(on_operation, "ON", "cancelled_by_OFF_timeout", now);
+            finish_operation(off_operation, "OFF", "unconfirmed_timeout", now);
             failed = true;
             pending = false;
             id = 0;
@@ -391,7 +466,7 @@ void worker(void *) {
             portENTER_CRITICAL(&lock);
             model.stop_timed_out = stop_expired;
             portEXIT_CRITICAL(&lock);
-            set_state(before.paired ? State::OFFLINE : State::UNPAIRED);
+            set_state(before.paired ? State::OFFLINE : State::UNPAIRED, "OFF_total_timeout");
             APP_LOGI(kEventTag, "retries stopped close_timeout=%u output_confirmed=%u output=%u",
                            stop_expired, before.output_confirmed, before.output_on);
         }
@@ -422,6 +497,28 @@ void worker(void *) {
         const bool quiesced = model.quiesced;
         const auto current_data = model;
         portEXIT_CRITICAL(&lock);
+        if (current_data.output_on != output_before || current_data.output_confirmed != confirmed_before) {
+            APP_LOGI(kEventTag, "output value=%u confirmed=%u state=%s evidence=%s",
+                     current_data.output_on, current_data.output_confirmed,
+                     !current_data.output_confirmed ? "unconfirmed" : current_data.output_on ? "ON" : "OFF",
+                     current_data.output_time_us == 0 ? "unknown" : "ack_or_matched_telemetry");
+            output_before = current_data.output_on; confirmed_before = current_data.output_confirmed;
+        }
+        if (current_data.protection_mask != protection_before) {
+            const unsigned mask = current_data.protection_mask;
+            APP_LOGI(kEventTag, "protection old=0x%x new=0x%x OTP=%u OVP=%u UVP=%u OCP=%u source=remote",
+                     protection_before, mask, !!(mask&1), !!(mask&2), !!(mask&4), !!(mask&8));
+            APP_LOGI(kEventTag, "protection sample valid=%u age_ms=%lld V_mv=%u I_ua=%ld board_cC=%d chip_cC=%d",
+                     current_data.data_time_us > 0,
+                     static_cast<long long>(current_data.data_time_us > 0 ? (now-current_data.data_time_us)/1000 : -1),
+                     current_data.data.voltage_mv, static_cast<long>(current_data.data.current_ua),
+                     current_data.data.board_temperature_centi_c, current_data.data.chip_temperature_centi_c);
+            protection_before = current_data.protection_mask;
+        }
+        if (recovery_pending && !EspNowLink::is_recovering_channel()) {
+            recovery_log.observe(TAG, "peer channel recovery", EspNowLink::get_channel_recovery_result());
+            recovery_pending = false;
+        }
         // 连接已失败或已静止时不再推进事务，仅维持心跳节拍。
         if (failed || quiesced) {
             vTaskDelay(pdMS_TO_TICKS(10));
@@ -441,6 +538,9 @@ void worker(void *) {
             EspNowLink::cancel_transmissions();
             current_data_request = 0;
             if (action == EspNowService::SwitchAction::ON) {
+                finish_operation(on_operation, "ON", "ack_timeout_output_unknown", now);
+                begin_operation(off_operation, operation_serial, "OFF", "ON_ack_timeout", now);
+                off_logged = false;
                 // ON 执行结果不明，转为有期限的 OFF 同步，不继续重放 ON。
                 off_required = true;
                 off_since = now;
@@ -449,27 +549,32 @@ void worker(void *) {
             recovery_needed = true;
             retry_at = action == EspNowService::SwitchAction::ON ? now :
                 now + RuntimeSettings::get(RuntimeSettings::Id::OffRetryMs) * 1000LL;
-            set_state(State::OFFLINE);
-            APP_LOGW(TAG, "switch timeout id=%lu action=%u OFF_pending=%u",
+            set_state(State::OFFLINE, "ack_timeout");
+            APP_LOGI(TAG, "switch timeout id=%lu action=%u OFF_pending=%u",
                      static_cast<unsigned long>(timed_out_id), static_cast<unsigned>(action), off_required);
         }
-        // 急停保持期间，若已配对计量端被外部开输出，必须再次将其关断。
-        if (low && (current_data.data.status_flags & 1) && current_data.data_time_us > 0 &&
+        // 急停保持期间，只依据控制应答或匹配当前请求的遥测更新后的输出状态再次关断。
+        // 显示用 data.status_flags 可能仍缓存关断前的 ON，不能推翻已收到的 OFF 确认。
+        if (low && current_data.output_on && current_data.output_time_us > 0 &&
             !pending && !off_required) {
+            begin_operation(off_operation, operation_serial, "OFF", "output_ON_while_stop_held", now);
+            off_logged = false;
             off_required = true;
             off_since = now;
             EspNowLink::cancel_transmissions();
             current_data_request = 0;
         }
         if (on_after_off && !off_required && now >= on_submit_until) {
+            finish_operation(on_operation, "ON", "submit_timeout", now);
             on_after_off = false;
-            set_state(State::OFFLINE);
+            set_state(State::OFFLINE, "ON_submit_timeout");
         }
         // 链路异常时按约 3 秒间隔发起一次对端信道恢复，直到重新可达。
         if (recovery_needed && !pending && now >= recover_at && !EspNowLink::is_recovering_channel()) {
             const auto err = EspNowLink::recover_peer_channel(saved.address);
             APP_LOGI(TAG, "CHANNEL_RECOVERY submit=%s", esp_err_to_name(err));
-            APP_LOGW(TAG, "channel recovery: %s", esp_err_to_name(err));
+            recovery_submit_log.observe(TAG, "peer channel recovery submit", err);
+            recovery_pending = err == ESP_OK;
             recover_at = now + 3000000;
             recovery_needed = false;
         }
@@ -480,11 +585,11 @@ void worker(void *) {
              !contact_fell.load() && !stop_requested.load()))) {
             action = off_required ? EspNowService::SwitchAction::OFF : EspNowService::SwitchAction::ON;
             const auto err = EspNowService::send_switch_request(saved.address, action, &id);
-            if (err != ESP_OK)
-                APP_LOGE(TAG, "switch submit action=%u: %s",
-                         static_cast<unsigned>(action), esp_err_to_name(err));
-            else if (action == EspNowService::SwitchAction::ON || !off_logged) {
-                APP_LOGI(kEventTag, "switch TX id=%lu action=%u", static_cast<unsigned long>(id),
+            auto& operation = action == EspNowService::SwitchAction::ON ? on_operation : off_operation;
+            ++operation.attempts;
+            submit_log.observe(TAG, "switch submit", err);
+            if (err == ESP_OK && (action == EspNowService::SwitchAction::ON || !off_logged)) {
+                APP_LOGI(kEventTag, "switch TX op=%lu id=%lu action=%u", static_cast<unsigned long>(operation.number), static_cast<unsigned long>(id),
                                static_cast<unsigned>(action));
                 if (action == EspNowService::SwitchAction::OFF)
                     off_logged = true;
@@ -508,15 +613,15 @@ void worker(void *) {
                     model.output_on = true;
                     ++model.on_attempt;
                 }
-                model.state = off_required ? State::STOPPING : State::STARTING;
                 portEXIT_CRITICAL(&lock);
+                set_state(off_required ? State::STOPPING : State::STARTING, "switch_submitted");
                 pending = true;
                 deadline = now + RuntimeSettings::get(off_required ? RuntimeSettings::Id::OffAckMs : RuntimeSettings::Id::OnAckMs) * 1000LL;
             } else {
                 retry_at =
                     now + (off_required ? RuntimeSettings::get(RuntimeSettings::Id::OffRetryMs) * 1000LL : 100000);
                 recovery_needed = true;
-                set_state(State::OFFLINE);
+                set_state(State::OFFLINE, "switch_submit_failed");
             }
         }
         // 仅在无 OFF 待办时按 5Hz 轮询遥测；长时间收不到数据则触发信道恢复。
@@ -525,8 +630,7 @@ void worker(void *) {
             const auto err = EspNowService::request_device_data(saved.address, &requested_id);
             if (err == ESP_OK) current_data_request = requested_id;
             data_at = now + 200000; // 5Hz 遥测轮询。
-            if (err != ESP_OK)
-                APP_LOGE(TAG, "data request: %s", esp_err_to_name(err));
+            data_log.observe(TAG, "data request", err);
             if (err != ESP_OK || (current_data.data_time_us > 0 && now - current_data.data_time_us > 3000000)) {
                 recovery_needed = true;
             }
@@ -534,12 +638,12 @@ void worker(void *) {
         // 若 3 秒内的遥测仍带保护标志，则对外显示为受保护状态。
         if (!pending && !off_required && current_data.protection_mask && current_data.data_time_us > 0 &&
             now - current_data.data_time_us < 3000000)
-            set_state(State::PROTECTED);
+            set_state(State::PROTECTED, "remote_protection");
         else if (!pending && !off_required && !on_after_off && current_data.state == State::PROTECTED &&
                  !current_data.protection_mask && current_data.data_time_us > 0 &&
                  current_data.data_time_us > protection_refused_at &&
                  now - current_data.data_time_us < 3000000)
-            set_state(current_data.output_on ? State::ON : State::OFF);
+            set_state(current_data.output_on ? State::ON : State::OFF, "remote_protection_cleared");
         vTaskDelay(pdMS_TO_TICKS(10)); // 主循环固定 10ms 节拍。
     }
 }
@@ -590,13 +694,14 @@ void cancel_sleep() { pause_requested.store(false); }
 void retry_connection() { retry_requested.store(true); }
 // 仅当在线、连接未失败且存在已配对节点时才上报电量。
 void report_battery(uint8_t percent) {
+    static AppDiagnostics::ErrorLog report_log; // 唯一调用者为协调任务。
     EspNowLink::SavedPeer peer{};
     const auto s = snapshot();
     if (!s.online || s.connection_failed || EspNowLink::get_saved_peer(0, &peer) != ESP_OK)
         return;
     const auto err = EspNowService::send_remote_battery(peer.address, percent);
-    if (err != ESP_OK)
-        APP_LOGE(TAG, "battery report percent=%u: %s", percent, esp_err_to_name(err));
+    report_log.observe(TAG, "battery report", err);
+    APP_LOGI(TAG, "battery report percent=%u result=%s", percent, esp_err_to_name(err));
 }
 void test_wrong_channel() { wrong_channel_requested.store(true); }
 // 复制快照并补全派生字段：并入原子请求的忙位、校验静止一致性、按新鲜度判定在线。

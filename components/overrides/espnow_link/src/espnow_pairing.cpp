@@ -4,6 +4,7 @@
 
 #include "esp_check.h"
 #include "esp_log.h"
+#include "esp_timer.h"
 #include "diagnostic_log.h"
 #include "esp_now.h"
 #include "esp_random.h"
@@ -17,6 +18,7 @@ namespace Internal {
 namespace {
 
 static constexpr char        TAG[]                 = "EspNowPairing";
+static constexpr char        kPairEventTag[]       = "PairingEvent"; // 本工程仅配对结果使用的 INFO 白名单标签。
 static constexpr size_t      EVENT_QUEUE_LENGTH    = 12;
 static constexpr uint32_t    TASK_STACK_SIZE       = 4096;
 static constexpr UBaseType_t TASK_PRIORITY         = 3;
@@ -225,9 +227,12 @@ void handle_pair_confirm(const PairEvent& event) {
     memcpy(peer.lmk, pending_lmk, sizeof(peer.lmk));
     peer.channel   = pending_channel;
     peer.encrypted = true;
-    if (save_peer(peer, pending_channel) == ESP_OK) {
-        DEVICE_STATE_I(TAG, "espnow: peer action=paired role=responder channel=%u result=ok",
-                       static_cast<uint32_t>(pending_channel));
+    const esp_err_t saved = save_peer(peer, pending_channel);
+    DEVICE_STATE_I(kPairEventTag, "pairing role=responder peer=%02x:%02x:%02x:%02x:%02x:%02x channel=%u result=%s t=%lld",
+                   peer.address.bytes[0], peer.address.bytes[1], peer.address.bytes[2], peer.address.bytes[3],
+                   peer.address.bytes[4], peer.address.bytes[5], pending_channel, esp_err_to_name(saved),
+                   static_cast<long long>(esp_timer_get_time()/1000));
+    if (saved == ESP_OK) {
         pair_transaction_active = false;
         leave_pairing_mode();
     }
@@ -354,7 +359,8 @@ void run_channel_recovery(const MacAddress& peer) {
     restore_peers();
     channel_recovery_result = ESP_ERR_TIMEOUT;
     channel_recovering      = false;
-    ESP_LOGW(TAG, "peer channel recovery failed");
+    // 恢复会按固定周期重试；此处保留实时结果，产品层记录首次失败与恢复事件。
+    ESP_LOGI(TAG, "peer channel recovery failed");
 }
 
 bool try_pair_on_channel(uint8_t channel) {
@@ -508,11 +514,13 @@ void pairing_task(void*) {
                 memcpy(peer.lmk, pending_lmk, sizeof(peer.lmk));
                 peer.channel   = pending_channel;
                 peer.encrypted = true;
-                save_peer(peer, pending_channel);
+                const esp_err_t saved = save_peer(peer, pending_channel);
                 initiating_pairing = false;
                 unregister_initiator_handlers();
-                DEVICE_STATE_I(TAG, "espnow: peer action=paired role=initiator channel=%u result=ok",
-                               static_cast<uint32_t>(pending_channel));
+                DEVICE_STATE_I(kPairEventTag, "pairing role=initiator peer=%02x:%02x:%02x:%02x:%02x:%02x channel=%u result=%s t=%lld",
+                               peer.address.bytes[0], peer.address.bytes[1], peer.address.bytes[2], peer.address.bytes[3],
+                               peer.address.bytes[4], peer.address.bytes[5], pending_channel, esp_err_to_name(saved),
+                               static_cast<long long>(esp_timer_get_time()/1000));
             } else {
                 EspNowLink::remove_peer(pending_peer);
                 initiating_pairing = false;

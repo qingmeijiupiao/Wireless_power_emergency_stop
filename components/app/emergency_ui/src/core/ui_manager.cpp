@@ -4,7 +4,7 @@
  */
 #include "core/ui_manager.h"
 
-#include "diagnostic_log.h"
+#include "app_diagnostics.h"
 #include "esp_attr.h"
 #include "esp_log.h"
 #include "esp_system.h"
@@ -47,7 +47,7 @@ void UiManager::reset(int64_t now_us) {
         if (page == 6 || page == 7 || (page >= 10 && page <= 18)) {
             state_.notice.restore(page, now_us, RuntimeSettings::get(RuntimeSettings::Id::NoticeMs) * 1000LL);
             state_.fault_page = page;
-            ESP_LOGI(TAG, "RESTORED_FAULT_HISTORY page=%d", page);
+            APP_LOGI(kEventTag, "fault history restored page=%d current_fault=unknown", page);
         }
     }
     published_fault_.store(state_.fault_page);
@@ -58,7 +58,7 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
     Update result;
     // 任何按键都视为用户活动：记录事件、阻止休眠并请求重绘。
     if (event != Gesture::None) {
-        DEVICE_EVENT_I(kEventTag, "BOOT %s view=%u item=%d", event_name(event),
+        APP_LOGI(kEventTag, "BOOT %s view=%u item=%d", event_name(event),
                        static_cast<unsigned>(state_.menu.view), state_.menu.selected);
         result.activity = true;
         redraw_ = true;
@@ -76,7 +76,7 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
         redraw_ = true;
         ESP_LOGI(TAG, "FAULT_NOTICE page=%d hold_ms=%lu", state_.notice.page,
                  static_cast<unsigned long>(RuntimeSettings::get(RuntimeSettings::Id::NoticeMs)));
-        DEVICE_EVENT_I(kEventTag, "fault notice page=%d protection=%u attempt=%lu", state_.notice.page,
+        APP_LOGI(kEventTag, "fault notice page=%d protection=%u attempt=%lu", state_.notice.page,
                        remote.protection_mask, static_cast<unsigned long>(remote.on_attempt));
     }
     // 连接失败上升沿：回到主页并记为一次活动，避免停留在失效的菜单里。
@@ -98,7 +98,7 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
             (state_.current_fault >= 0 || state_.notice.holding(now_us)) &&
             event == Gesture::Short) {
             event = Gesture::None;
-            ESP_LOGI(TAG, "FAULT_ACK show data; output unchanged");
+            APP_LOGI(kEventTag, "fault acknowledged source=ui page=%d output_unchanged=1", state_.notice.page);
         }
         state_.fault_acknowledged = true;
         state_.notice.dismiss();
@@ -114,8 +114,18 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
     Update page_update = resolve(remote)->handle_button(remote, event, now_us, state_);
     if (state_.menu.view != view_before)
         redraw_ = true;
-    if (page_update.action != Action::None)
-        DEVICE_EVENT_I(kEventTag, "menu action=%u", static_cast<unsigned>(page_update.action));
+    if (page_update.action != Action::None) {
+        const char* action = "unknown";
+        switch (page_update.action) {
+        case Action::AlwaysOn: action = "always_on"; break;
+        case Action::Sleep: action = "sleep"; break;
+        case Action::SleepTime: action = "sleep_time"; break;
+        case Action::Pair: action = "pair"; break;
+        case Action::Repair: action = "repair"; break;
+        default: break;
+        }
+        APP_LOGI(kEventTag, "menu action=%s sleep_choice=%d", action, page_update.sleep_choice);
+    }
 
     result.action = page_update.action;
     result.retry = page_update.retry;
@@ -128,8 +138,6 @@ bool UiManager::observe_state(const Model &model) {
     const auto &remote = model.remote;
     // 状态跳变时记录进入时刻；连接失败属于被动结果，不计为用户活动。
     if (remote.state != state_.last_state) {
-        DEVICE_EVENT_I(kEventTag, "control state %u -> %u", static_cast<unsigned>(state_.last_state),
-                       static_cast<unsigned>(remote.state));
         state_.last_state = remote.state;
         state_.state_since = model.now_us;
         if (!remote.connection_failed)

@@ -6,6 +6,7 @@
 
 #include "emergency_remote.h"
 #include "esp_err.h"
+#include "app_diagnostics.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 
@@ -93,5 +94,7 @@ private:
     bool boot_pending_ = true;        /**< 尚未取得首次成功采样，用于重试和启动事件补记。 */
     bool usb_before_ = false;         /**< 上轮 USB 状态，仅用于插拔边沿检测。 */
     bool connected_before_ = false;   /**< 上轮 online && !connection_failed，仅用于重连补报。 */
+    bool low_before_ = false;         /**< 低电进入/退出事件基准，不跟随 UI 提示页刷新。 */
+    AppDiagnostics::ErrorLog sample_log_; /**< 周期采样失败只在错误变化时持久化。 */
 };
 } // namespace AppController

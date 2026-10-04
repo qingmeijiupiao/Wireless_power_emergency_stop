@@ -117,12 +117,13 @@ esp_err_t init() {
             // 无参数时默认查询状态；其余为显式的维护动作。
             const char* action = argc > 1 ? argv[1] : "status";
             if (!strcmp(action, "reset-calibration")) {
-                const esp_err_t ret = BatteryVoltage::reset_calibration();
+                const esp_err_t ret = BatteryVoltage::reset_calibration("shell");
                 printf("battery calibration reset: %s\n", esp_err_to_name(ret));
                 return ret == ESP_OK ? 0 : 1;
             }
             if (!strcmp(action, "reset-level")) {
                 BatteryStatus::reset();
+                APP_LOGI("ProductEvent", "battery reset_level source=shell result=ok");
                 printf("battery RTC level reset\n");
                 return 0;
             }
@@ -190,7 +191,7 @@ esp_err_t init() {
             char* end = nullptr;
             const unsigned long value = strtoul(argv[2], &end, 10);
             if (!*argv[2] || *end || argv[2][0] == '-' || value > UINT32_MAX ||
-                !RuntimeSettings::set(argv[1], static_cast<uint32_t>(value))) {
+                !RuntimeSettings::set(argv[1], static_cast<uint32_t>(value), "shell")) {
                 printf("ERROR invalid name/range or NVS write failure; use config\n");
                 return 1;
             }
@@ -221,26 +222,31 @@ esp_err_t init() {
                 return 0;
             }
             if (!strcmp(action, "stop")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=stop result=submitted");
                 EmergencyRemote::request_stop();
                 printf("remote stop requested\n");
                 return 0;
             }
             if (!strcmp(action, "on")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=on result=submitted");
                 EmergencyRemote::request_on();
                 printf("remote on requested\n");
                 return 0;
             }
             if (!strcmp(action, "retry")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=retry result=submitted");
                 EmergencyRemote::retry_connection();
                 printf("remote retry requested\n");
                 return 0;
             }
             if (!strcmp(action, "pair")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=pair result=submitted");
                 EmergencyRemote::start_pairing(false);
                 printf("remote pairing started\n");
                 return 0;
             }
             if (!strcmp(action, "repair")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=repair result=submitted");
                 EmergencyRemote::start_pairing(true);
                 printf("remote pairing started (peers cleared)\n");
                 return 0;

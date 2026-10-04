@@ -7,7 +7,7 @@
 #include "app_controller.h"
 #include "battery_status.h"
 #include "battery_voltage.h"
-#include "diagnostic_log.h"
+#include "app_diagnostics.h"
 #include "esp_log.h"
 #include "hardware.h"
 #include "runtime_settings.h"
@@ -55,18 +55,18 @@ BatteryMonitor::Update BatteryMonitor::poll(int64_t now_us, bool usb) {
     Update update;
     Sample sample{};
     if (xQueueReceive(samples_, &sample, 0) == pdTRUE) {
+        sample_log_.observe(kTag, "battery sample", sample.result);
         if (sample.result == ESP_OK) {
             latest_mv_ = sample.voltage_mv;
             const auto level = BatteryStatus::update(sample.voltage_mv, usb);
             // 启动诊断不等待电池；首次成功在这里补记一次产品事件。
             if (boot_pending_) {
-                DEVICE_EVENT_I(kEventTag, "boot battery ready battery_mv=%d soc=%u", sample.voltage_mv,
+                APP_LOGI(kEventTag, "boot battery ready battery_mv=%d soc=%u", sample.voltage_mv,
                                static_cast<unsigned>(level.displayed_percent));
                 boot_pending_ = false;
             }
             update.redraw = true;
         } else {
-            ESP_LOGE(kTag, "battery sample: %s", esp_err_to_name(sample.result));
             if (boot_pending_)
                 sample_at_ = now_us + kBootRetryUs;
         }
@@ -75,10 +75,10 @@ BatteryMonitor::Update BatteryMonitor::poll(int64_t now_us, bool usb) {
     // 只有 USB 边沿计为活动；常规采样和电量变化不会延后静置休眠。
     if (usb != usb_before_) {
         const auto battery = view();
-        DEVICE_EVENT_I(kEventTag, "USB %s battery_mv=%d soc=%d", usb ? "inserted" : "removed",
+        APP_LOGI(kEventTag, "USB %s battery_mv=%d soc=%d", usb ? "inserted" : "removed",
                        battery.voltage_mv, battery.percent);
         usb_before_ = usb;
-    BatteryVoltage::notify_external_power(usb);
+        BatteryVoltage::notify_external_power(usb);
         sample_at_ = now_us;
         update.activity = true;
         update.redraw = true;
@@ -93,6 +93,14 @@ BatteryMonitor::Update BatteryMonitor::poll(int64_t now_us, bool usb) {
         // 忙时也顺延到下一个周期，不在每个协调循环内重复尝试创建采样任务。
         sample_at_ = now_us + RuntimeSettings::get(RuntimeSettings::Id::BatteryMs) * 1000LL;
         update.redraw = true;
+    }
+    const auto battery = view();
+    const auto threshold = RuntimeSettings::get(RuntimeSettings::Id::LowMv);
+    const bool low = battery.voltage_mv > 0 && battery.voltage_mv <= static_cast<int>(threshold) && !usb;
+    if (low != low_before_) {
+        APP_LOGI(kEventTag, "battery low=%u battery_mv=%d soc=%d threshold_mv=%lu usb=%u",
+                 low, battery.voltage_mv, battery.percent, static_cast<unsigned long>(threshold), usb);
+        low_before_ = low;
     }
     return update;
 }

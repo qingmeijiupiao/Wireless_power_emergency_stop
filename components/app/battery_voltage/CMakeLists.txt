@@ -10,5 +10,5 @@ idf_component_register(
     SRCS "src/battery_voltage.cpp" "src/battery_status.cpp"
     INCLUDE_DIRS "include"
     REQUIRES battery_level esp_common freertos
-    PRIV_REQUIRES ADC HXC_NVS esp_driver_gpio esp_timer log
+    PRIV_REQUIRES app_diagnostics ADC HXC_NVS esp_driver_gpio esp_timer log
 )

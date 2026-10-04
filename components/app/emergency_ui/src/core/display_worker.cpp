@@ -4,6 +4,7 @@
 #include "core/display_worker.h"
 #include "sh1106.h"
 #include "esp_log.h"
+#include "app_diagnostics.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
@@ -27,6 +28,8 @@ void worker(void*) {
     bool enabled = false, dirty = false;
     unsigned failures = 0;
     int64_t retry_at = 0, log_at = 0;
+    bool had_error = false;
+    AppDiagnostics::ErrorLog display_log; // 独占于 OLED 任务，不参与重试或硬件状态判定。
     for (;;) {
         Command command{};
         if (xQueueReceive(commands, &command, pdMS_TO_TICKS(10)) == pdTRUE) {
@@ -76,9 +79,15 @@ void worker(void*) {
                 }
             }
         }
-        if (error != ESP_OK && now >= log_at) {
-            ESP_LOGE(kTag, "OLED error=%s retry_us=%lld", esp_err_to_name(error), (long long)retry_at);
-            log_at = now + 3000000;
+        if (error != ESP_OK) {
+            had_error = true;
+            if (now >= log_at) {
+                display_log.observe(kTag, "OLED", error);
+                log_at = now + 3000000;
+            }
+        } else if (had_error) {
+            display_log.observe(kTag, "OLED", ESP_OK);
+            had_error = false;
         }
     }
 }

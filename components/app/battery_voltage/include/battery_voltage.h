@@ -140,8 +140,9 @@ void get_calibration_status(CalibrationStatus& status);
  * @brief 清除已保存的校准结果并恢复默认 2.0 倍分压倍率
  *
  * 写入一条校验无效的记录，使系统在重启后仍显示为“未校准”并使用默认倍率。
+ * @param source 操作来源，写入修改事件；为空时记录 unknown。
  */
-esp_err_t reset_calibration();
+esp_err_t reset_calibration(const char* source = "app");
 
 } // namespace BatteryVoltage
 

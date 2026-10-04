@@ -6,6 +6,7 @@
 
 #include "battery_monitor.h"
 #include "event_recorder.h"
+#include "runtime_diagnostics.h"
 #include "input_actions.h"
 #include "sleep_coordinator.h"
 #include "esp_timer.h"
@@ -51,6 +52,7 @@ void run(void *) {
     // 提交屏幕启动后建立静置基准，避免把初始化耗时计为用户空闲。
     PowerManager::init_idle(esp_timer_get_time());
     EventRecorder events;
+    RuntimeDiagnostics diagnostics;
     SleepCoordinator sleep;
 
     while (true) {
@@ -75,6 +77,7 @@ void run(void *) {
             PowerManager::note_activity(model.now_us);
         // 状态观察可能生成新的故障/低电提示，休眠计划必须读取更新后的截止时间。
         model.sleep = sleep.plan(model);
+        diagnostics.report(model);
         redraw = sleep.process_auto(model.sleep, model.now_us) || redraw;
         battery_monitor.report(remote, model.battery_percent, model.now_us);
         EmergencyUi::render(model, redraw);

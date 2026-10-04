@@ -11,7 +11,7 @@
 #include "runtime_settings.h"
 #include "blackbox.h"
 #include "blackbox_service.h"
-#include "diagnostic_log.h"
+#include "app_diagnostics.h"
 #include "esp_sleep.h"
 #include "esp_attr.h"
 #include "esp_timer.h"
@@ -57,7 +57,7 @@ SleepPlan plan(int64_t now_us, int64_t notice_deadline, bool notice_allowed, boo
     const bool allowed = (!RuntimeSettings::always_on() || failed) && block() == SleepBlock::None;
     const auto result = countdown.update(now_us, deadline, allowed && notice_allowed);
     if (result.countdown != countdown_active) {
-        DEVICE_EVENT_I(kEventTag, "sleep countdown %s seconds=%lu",
+        APP_LOGI(kEventTag, "sleep countdown %s seconds=%lu",
                        result.countdown ? "started"
                        : result.due     ? "completed"
                                         : "cancelled",
@@ -84,20 +84,20 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
     (void)BatteryStatus::get_status(battery);
     // 先做一次快速阻塞判定，避免无谓地走完整流程。
     auto reason = block();
-    DEVICE_EVENT_I(kEventTag, "sleep request source=%s block=%u battery_mv=%d soc=%d", manual ? "manual" : "idle",
-                   static_cast<unsigned>(reason), battery.voltage_mv,
+    APP_LOGI(kEventTag, "sleep request source=%s block=%s battery_mv=%d soc=%d", manual ? "manual" : "idle",
+                   sleep_block_name(reason), battery.voltage_mv,
                    static_cast<int>(battery.displayed_percent));
     if (reason != SleepBlock::None)
         return static_cast<int>(reason);
     // 与遥控工作线程握手：让其把未完成的开关/配对事务处理干净再睡。
     if (!EmergencyRemote::prepare_sleep()) {
-        DEVICE_EVENT_I(kEventTag, "sleep denied: remote not quiesced");
+        APP_LOGI(kEventTag, "sleep denied: remote not quiesced");
         return 4;
     }
     if (!BatteryVoltage::prepare_sleep()) {
         BatteryVoltage::cancel_sleep();
         EmergencyRemote::cancel_sleep();
-        DEVICE_EVENT_I(kEventTag, "sleep denied: battery not quiesced");
+        APP_LOGI(kEventTag, "sleep denied: battery not quiesced");
         return 4;
     }
     // 静止后再取得最后完成的读数，避免睡前样本仍留在协调器邮箱中未消费。
@@ -126,13 +126,17 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
         EmergencyRemote::cancel_sleep();
         BatteryVoltage::cancel_sleep();
         display.restore();
-        DEVICE_EVENT_I(kEventTag, "sleep denied: display not quiesced");
+        APP_LOGI(kEventTag, "sleep denied: display not quiesced");
         return 4;
     }
     if (Blackbox::is_enabled()) {
-        DEVICE_EVENT_I(kEventTag, "deep sleep entry source=%s battery_mv=%d soc=%d contact_low=%u wake=GPIO3/4/5",
+        const auto remote = EmergencyRemote::snapshot();
+        APP_LOGI(kEventTag, "sleep prepare source=%s battery_mv=%d soc=%d contact_low=%u wake=GPIO3/4/5",
                        manual ? "manual" : "idle", battery.voltage_mv,
                        static_cast<int>(battery.displayed_percent), contact_low);
+        APP_LOGI(kEventTag, "sleep output=%u confirmed=%u close_timeout=%u policy=%s",
+                 remote.output_on, remote.output_confirmed, remote.stop_timed_out,
+                 remote.stop_timed_out ? "allow_after_OFF_timeout" : "confirmed_OFF");
         if (!AppDiagnostics::flush())
             ESP_LOGW(TAG, "app diagnostics flush timed out");
         const auto sync_err = BlackboxService::sync();
@@ -148,8 +152,8 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
     // 复查未通过（出现新阻塞、触点状态变化或遥控不再静止）则取消睡眠并恢复显示。
     if (reason != SleepBlock::None || contact_low != (gpio_get_level(kStopButton) == 0) ||
         !EmergencyRemote::snapshot().quiesced) {
-        DEVICE_EVENT_I(kEventTag, "sleep aborted before entry block=%u contact_changed=%u",
-                       static_cast<unsigned>(reason), contact_low != (gpio_get_level(kStopButton) == 0));
+        APP_LOGI(kEventTag, "sleep aborted before entry block=%s contact_changed=%u",
+                       sleep_block_name(reason), contact_low != (gpio_get_level(kStopButton) == 0));
         EmergencyRemote::cancel_sleep();
         BatteryVoltage::cancel_sleep();
         Hardware::screen_power(true);
@@ -181,7 +185,7 @@ int enter_sleep(const DisplayHooks &display, bool manual) {
     vTaskDelay(pdMS_TO_TICKS(100));
     display.restore();
     ESP_LOGW(TAG, "SLEEP_ENTRY_ABORTED %s", esp_err_to_name(err));
-    DEVICE_EVENT_I(kEventTag, "sleep rejected by hardware: %s", esp_err_to_name(err));
+    APP_LOGI(kEventTag, "sleep rejected by hardware: %s", esp_err_to_name(err));
     return 4;
 }
 } // namespace PowerManager

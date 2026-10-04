@@ -7,11 +7,12 @@ idf_component_register(
         "src/input_actions.cpp"
         "src/sleep_coordinator.cpp"
         "src/event_recorder.cpp"
+        "src/runtime_diagnostics.cpp"
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
     REQUIRES esp_common
     # UI、无线、电池和电源管理均为协调器的实现依赖。
     PRIV_REQUIRES
-        battery_voltage diagnostic_log emergency_remote emergency_ui esp_timer
-        espnow_link freertos hardware log power_manager runtime_settings
+        battery_voltage app_diagnostics emergency_remote emergency_ui esp_timer
+        espnow_link freertos hardware log power_manager runtime_settings heap
 )

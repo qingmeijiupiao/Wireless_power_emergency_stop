@@ -8,7 +8,7 @@
  */
 #include "runtime_settings.h"
 #include "HXC_NVS.h"
-#include "diagnostic_log.h"
+#include "app_diagnostics.h"
 #include "esp_log.h"
 #include <atomic>
 #include "freertos/FreeRTOS.h"
@@ -73,9 +73,9 @@ uint32_t get(Id id) {
     const auto index = static_cast<unsigned>(id);
     return index < static_cast<unsigned>(Id::Count) ? entries[index].value.load() : 0;
 }
-bool set(Id id, uint32_t value) {
+bool set(Id id, uint32_t value, const char* source) {
     const auto index = static_cast<unsigned>(id);
-    return index < static_cast<unsigned>(Id::Count) && set(entries[index].name, value);
+    return index < static_cast<unsigned>(Id::Count) && set(entries[index].name, value, source);
 }
 // 按名读取原子缓存；未知名称返回 0。
 uint32_t get(const char *name) {
@@ -86,26 +86,34 @@ uint32_t get(const char *name) {
     return 0;
 }
 // 先做范围校验并写入 NVS，成功后再更新缓存；有效变化会写入黑匣子便于审计。
-bool set(const char *name, uint32_t value) {
+bool set(const char *name, uint32_t value, const char* source) {
     if (!name) return false;
+    source = source ? source : "unknown";
     for (auto &e : entries)
         if (!strcmp(name, e.name)) {
-            if (value < e.min || value > e.max)
+            if (value < e.min || value > e.max) {
+                APP_LOGI(kEventTag, "setting source=%s name=%s requested=%lu result=out_of_range",
+                         source, name, static_cast<unsigned long>(value));
                 return false;
+            }
             if (!writer_mutex) return false;
             xSemaphoreTake(writer_mutex, portMAX_DELAY);
-            if (e.storage.set(value) != ESP_OK) {
+            const esp_err_t result = e.storage.set(value);
+            if (result != ESP_OK) {
+                APP_LOGI(kEventTag, "setting source=%s name=%s requested=%lu result=%s",
+                         source, name, static_cast<unsigned long>(value), esp_err_to_name(result));
                 xSemaphoreGive(writer_mutex);
-                ESP_LOGE(TAG, "setting write failed: %s=%lu", name, static_cast<unsigned long>(value));
                 return false;
             }
             const auto old = e.value.exchange(value);
+            // 在写事务内零等待入队，保证并发设置的发布和审计记录顺序一致。
+            APP_LOGI(kEventTag, "setting source=%s name=%s old=%lu new=%lu result=%s", source, name,
+                     static_cast<unsigned long>(old), static_cast<unsigned long>(value), old == value ? "unchanged" : "saved");
             xSemaphoreGive(writer_mutex);
-            if (old != value)
-                DEVICE_EVENT_I(kEventTag, "setting %s: %lu -> %lu", name, static_cast<unsigned long>(old),
-                               static_cast<unsigned long>(value));
             return true;
         }
+    APP_LOGI(kEventTag, "setting source=%s name=%s requested=%lu result=unknown_name", source, name,
+             static_cast<unsigned long>(value));
     return false;
 }
 // 逐行输出 name=value [min..max]，供 shell 的 config 命令使用。
@@ -117,22 +125,25 @@ void print() {
 // 将当前全部参数值写入黑匣子，形成一次配置快照。
 void record_snapshot() {
     for (auto &e : entries)
-        DEVICE_EVENT_I(kEventTag, "config %s=%lu", e.name, static_cast<unsigned long>(e.value.load()));
+        APP_LOGI(kEventTag, "config %s=%lu", e.name, static_cast<unsigned long>(e.value.load()));
 }
 // 读取常亮开关的运行期镜像。
 bool always_on() { return display_always_on.load(); }
 // 持久化常亮开关并更新镜像；写入失败返回 false 且不改动运行态。
-bool set_always_on(bool value) {
+bool set_always_on(bool value, const char* source) {
+    source = source ? source : "unknown";
     if (!writer_mutex) return false;
     xSemaphoreTake(writer_mutex, portMAX_DELAY);
-    if (stored_always_on.set(value ? 1U : 0U) != ESP_OK) {
+    const esp_err_t result = stored_always_on.set(value ? 1U : 0U);
+    if (result != ESP_OK) {
+        APP_LOGI(kEventTag, "setting source=%s name=always_on requested=%u result=%s", source, value, esp_err_to_name(result));
         xSemaphoreGive(writer_mutex);
-        ESP_LOGE(TAG, "setting always_on write failed: %u", value ? 1U : 0U);
         return false;
     }
     const bool old = display_always_on.exchange(value);
+    APP_LOGI(kEventTag, "setting source=%s name=always_on old=%u new=%u result=%s", source, old, value,
+             old == value ? "unchanged" : "saved");
     xSemaphoreGive(writer_mutex);
-    DEVICE_EVENT_I(kEventTag, "setting always_on: %u -> %u", old ? 1U : 0U, value ? 1U : 0U);
     return true;
 }
 

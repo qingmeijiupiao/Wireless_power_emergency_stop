@@ -125,6 +125,6 @@ direct_dependencies:
 - idf
 - shell
 - wifi_manager
-manifest_hash: b5c9be1ce35ba211f9596df185c00518b3ed407a6798586eaa7a14d3ce6c0280
+manifest_hash: 9c6588d8480034e21de2627addfcd402f9f7db087c8d179c6682f3c2fe7dc93d
 target: esp32c3
 version: 3.0.0

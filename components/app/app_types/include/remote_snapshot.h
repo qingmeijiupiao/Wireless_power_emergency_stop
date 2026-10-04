@@ -33,6 +33,27 @@ enum class State : uint8_t {
     NOT_READY,   // 远端尚未就绪
     DETECT_ERROR // 远端检测异常
 };
+/** @brief 稳定的状态名称，供诊断与事件回溯使用；未知枚举不猜测含义。 */
+inline const char* state_name(State state) {
+    switch (state) {
+    case State::READY: return "READY";
+    case State::OFF: return "OFF";
+    case State::ON: return "ON";
+    case State::STOPPING: return "STOPPING";
+    case State::STARTING: return "STARTING";
+    case State::SHORT_CHECK: return "SHORT_CHECK";
+    case State::SHORT_FAULT: return "SHORT_FAULT";
+    case State::PROTECTED: return "PROTECTED";
+    case State::OFFLINE: return "OFFLINE";
+    case State::UNPAIRED: return "UNPAIRED";
+    case State::REJECTED: return "REJECTED";
+    case State::COOLDOWN: return "COOLDOWN";
+    case State::BUSY: return "BUSY";
+    case State::NOT_READY: return "NOT_READY";
+    case State::DETECT_ERROR: return "DETECT_ERROR";
+    default: return "UNKNOWN";
+    }
+}
 // 某时刻的状态快照，供 UI 与其他组件读取；读取时在临界区内整体复制，避免撕裂。
 struct Snapshot {
     State state = State::UNPAIRED; // 当前对外可见状态

@@ -10,5 +10,5 @@ idf_component_register(
     INCLUDE_DIRS "include"
     PRIV_INCLUDE_DIRS "private_include"
     REQUIRES diagnostic_log esp_wifi wifi_manager HXC_NVS
-    PRIV_REQUIRES freertos log
+    PRIV_REQUIRES esp_timer freertos log
 )

@@ -15,19 +15,21 @@ enum class Id : uint8_t { ConnectMs, IdleMs, MenuIdleMs, NoticeMs, ReleaseMs, Of
     OffRetryMs, OnAckMs, FreshMs, BatteryMs, ReportMs, LowMv, Count };
 /** @brief 按类型无锁读取参数；非法索引返回 0。 */
 uint32_t get(Id id);
-/** @brief 按类型设置参数，范围校验与持久化/发布完整串行。 */
-bool set(Id id, uint32_t value);
+/** @brief 按类型设置参数，范围校验、持久化/发布和事件入队完整串行。
+ * @param source 操作来源，如 ui/shell/app；在调用内复制到日志文本。
+ */
+bool set(Id id, uint32_t value, const char* source = "app");
 
 // 从 NVS 载入全部参数到原子缓存，必须在其它模块读取前调用一次。
 void init();
 
-// 查询/切换“常亮(禁止自动休眠)”开关，切换结果会持久化。
+// 查询/切换“常亮(禁止自动休眠)”开关；source 同 set()，结果和旧/新值均记录。
 bool always_on();
-bool set_always_on(bool enabled);
+bool set_always_on(bool enabled, const char* source = "app");
 
 // 按名称读取/写入整型参数；get 对未知名称返回 0，set 会做范围校验。
 uint32_t get(const char *name);
-bool set(const char *name, uint32_t value);
+bool set(const char *name, uint32_t value, const char* source = "app");
 
 // 将当前全部参数及其有效范围打印到标准输出(命令层使用)。
 void print();

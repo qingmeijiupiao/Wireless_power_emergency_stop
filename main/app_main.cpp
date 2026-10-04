@@ -23,7 +23,8 @@
 
 namespace {
 constexpr char kTag[] = "app_main";
-constexpr const char *kInfoTags[] = {AppController::kEventTag};
+// 仅放行操作事件标签；不能放行 EspNowPairing 整个标签，否则周期恢复 INFO 也会入库。
+constexpr const char *kInfoTags[] = {AppController::kEventTag, "PairingEvent"};
 
 /** @brief 急停下降沿 ISR：只锁存关闭请求，实际事务由遥控工作线程处理。 */
 void IRAM_ATTR on_stop_fall(void *) {
@@ -34,6 +35,7 @@ void IRAM_ATTR on_stop_fall(void *) {
 /** @brief ESP-IDF 启动入口：完成依赖初始化、创建独立任务并注册 Shell 后返回。 */
 extern "C" void app_main(void) {
     Hardware::init(on_stop_fall);
+    BootDiagnostics::capture_wake();
     // 供电稳定窗口从 GPIO 初始化后起算，后续初始化耗时计入窗口；主任务不等待。
     const int64_t battery_ready_at = esp_timer_get_time() + 100000;
     const bool release_wake = PowerManager::consume_release_wake();
@@ -48,12 +50,18 @@ extern "C" void app_main(void) {
     ESP_ERROR_CHECK(AppDiagnostics::init());
     RuntimeSettings::init();
     ESP_ERROR_CHECK(BatteryStatus::init());
+    // 启动记录先入队，避免控制工作者的首次 OFF 先于本次启动锚点。
+    BootDiagnostics::append_boot(release_wake);
 
     // 急停控制不等待供电稳定、首次电池采样或 OLED 初始化。
     ESP_ERROR_CHECK(EmergencyRemote::init(release_wake));
     ESP_ERROR_CHECK(BatteryVoltage::init(battery_ready_at));
+    BatteryVoltage::CalibrationStatus calibration{};
+    BatteryVoltage::get_calibration_status(calibration);
+    APP_LOGI(AppController::kEventTag, "boot calibration scale_q16=%lu stored=%u",
+             static_cast<unsigned long>(calibration.divider_scale_q16), calibration.stored_calibration_valid);
     EmergencyUi::init();
-    BootDiagnostics::append_boot(release_wake);
+    BootDiagnostics::append_peers();
 
     // 协调器异步采样并向 OLED 任务发布启动请求，主任务继续注册 Shell。
     ESP_ERROR_CHECK(AppController::start());
