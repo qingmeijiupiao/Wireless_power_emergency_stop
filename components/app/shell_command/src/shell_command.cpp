@@ -10,6 +10,8 @@
 #include "shell_command.h"
 #include "app_diagnostics.h"
 
+#include <cctype>
+#include <cinttypes>
 #include <climits>
 #include <cstdint>
 #include <cstdio>
@@ -38,10 +40,14 @@ constexpr char TAG[] = "ShellCommand";
 
 // 将可能包含控制字符的文本转义后输出，保证 dump 结果单行可解析。
 void print_escaped_text(const char* text) {
-    for (const char* cursor = text; *cursor != '\0'; ++cursor) {
+    putchar('"');
+    for (const uint8_t* cursor = reinterpret_cast<const uint8_t*>(text); *cursor != '\0'; ++cursor) {
         switch (*cursor) {
             case '\\':
                 printf("\\\\");
+                break;
+            case '"':
+                printf("\\\"");
                 break;
             case '\r':
                 printf("\\r");
@@ -53,9 +59,20 @@ void print_escaped_text(const char* text) {
                 printf("\\t");
                 break;
             default:
-                putchar(*cursor);
+                if (std::isprint(*cursor)) {
+                    putchar(*cursor);
+                } else {
+                    printf("\\x%02X", *cursor);
+                }
                 break;
         }
+    }
+    putchar('"');
+}
+
+void print_hex(const uint8_t* data, size_t len) {
+    for (size_t i = 0; i < len; ++i) {
+        printf("%02X", data[i]);
     }
 }
 
@@ -337,14 +354,13 @@ esp_err_t init() {
                         limit = UINT32_MAX;
                         limit_label = "all";
                     } else {
-                        char* end = nullptr;
-                        const unsigned long parsed = strtoul(argv[2], &end, 10);
-                        if (argv[2][0] == '\0' || *end != '\0' ||
-                            parsed == 0 || parsed > UINT32_MAX) {
+                        char*         end    = nullptr;
+                        uint32_t parsed = strtoul(argv[2], &end, 10);
+                        if (argv[2][0] == '\0' || *end != '\0' || parsed == 0 || parsed > UINT32_MAX) {
                             printf("Usage: blackbox %s [count|all]\n", action);
                             return 1;
                         }
-                        limit = static_cast<uint32_t>(parsed);
+                        limit       = static_cast<uint32_t>(parsed);
                         limit_label = argv[2];
                     }
                 }
@@ -364,50 +380,49 @@ esp_err_t init() {
                     return 1;
                 }
 
-                const auto view = Blackbox::snapshot();
-                const uint32_t raw_count = view.count;
-                bool overwritten = false;
-                printf("BLACKBOX_DUMP_BEGIN persisted_records=%lu limit=%s order=newest_first\n",
-                       static_cast<unsigned long>(raw_count),
-                       limit_label);
+                const uint32_t raw_count = Blackbox::count();
+                printf("BLACKBOX_DUMP_BEGIN persisted_records=%" PRIu32 " limit=%s order=newest_first\n",
+                       static_cast<uint32_t>(raw_count), limit_label);
                 uint32_t emitted = 0;
                 uint32_t index = 0;
-                // 文本事件可能横跨多条底层记录，record_count 指示步进长度；
-                // 无效记录单独标记并逐条前进，避免死循环。
-                while (index < raw_count && emitted < limit) {
-                    Blackbox::Record record{};
-                    Blackbox::TextRecord text{};
-                    const auto read_error = Blackbox::read_entry(view, index, record, text);
-                    if (read_error == ESP_ERR_INVALID_STATE) {
-                        printf("BLACKBOX_DUMP_ABORT snapshot overwritten or erased\n");
-                        overwritten = true;
-                        break;
-                    }
-                    if (read_error != ESP_OK && read_error != ESP_ERR_INVALID_CRC) {
-                        printf("BLACKBOX_DUMP_ABORT read=%s\n", esp_err_to_name(read_error));
-                        overwritten = true;
-                        break;
-                    }
-                    if (text.record_count != 0) {
-                        printf("r=%lu t_ms=%lu n=%u ",
-                               static_cast<unsigned long>(index),
-                               static_cast<unsigned long>(record.header.timestamp),
-                               static_cast<unsigned>(text.record_count));
-                        print_escaped_text(text.str);
-                        putchar('\n');
-                        index += text.record_count;
+                for (; index < raw_count && emitted < limit;) {
+                    const Blackbox::Record record = Blackbox::read(index);
+                    if (record.header.sof != CircularFlashBuffer::BLOCK_SOF) {
+                        printf("record=%" PRIu32 " type=INVALID\n", static_cast<uint32_t>(index));
+                        ++index;
                         ++emitted;
                         continue;
                     }
-                    printf("r=%lu invalid\n", static_cast<unsigned long>(index));
+
+                    if (record.header.type == Blackbox::LogType::STRING) {
+                        const Blackbox::TextRecord text = Blackbox::read_text(index);
+                        if (text.record_count != 0) {
+                            printf("record=%" PRIu32 " timestamp_ms=%" PRIu32
+                                   " type=STRING fragments=%" PRIu32 " text=",
+                                   static_cast<uint32_t>(index),
+                                   static_cast<uint32_t>(record.header.timestamp),
+                                   static_cast<uint32_t>(text.record_count));
+                            print_escaped_text(text.str);
+                            putchar('\n');
+                            index += text.record_count;
+                            ++emitted;
+                            continue;
+                        }
+                    }
+
+                    printf("record=%" PRIu32 " timestamp_ms=%" PRIu32 " type=%s payload=", static_cast<uint32_t>(index),
+                           static_cast<uint32_t>(record.header.timestamp),
+                           record.header.type == Blackbox::LogType::STRUCTURED ? "STRUCTURED" : "UNKNOWN");
+                    print_hex(record.payload.bytes, Blackbox::PAYLOAD_SIZE);
+                    putchar('\n');
                     ++index;
                     ++emitted;
                 }
-                printf("BLACKBOX_DUMP_END emitted=%lu consumed_records=%lu remaining_records=%lu\n",
-                       static_cast<unsigned long>(emitted),
-                       static_cast<unsigned long>(index),
-                       static_cast<unsigned long>(raw_count - index));
-                return overwritten ? 1 : 0;
+                printf("BLACKBOX_DUMP_END emitted=%" PRIu32 " consumed_records=%" PRIu32
+                       " remaining_records=%" PRIu32 "\n",
+                       static_cast<uint32_t>(emitted), static_cast<uint32_t>(index),
+                       static_cast<uint32_t>(raw_count - index));
+                return 0;
             }
 
             printf("Usage: blackbox [status|dump [count|all]|pull [count|all]|clear|mark <text>]\n");
