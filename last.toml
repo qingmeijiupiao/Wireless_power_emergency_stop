@@ -1,17 +1,17 @@
 schema_version = 1
-version = "0.5.0"
-published_at = "2026-10-04T15:16:08Z"
+version = "0.6.0"
+published_at = "2026-10-05T12:23:45Z"
 
 [firmware.app]
-filename = "Wireless_power_emergency_stop_app_v0.5.0.bin"
+filename = "Wireless_power_emergency_stop_app_v0.6.0.bin"
 offset = "0x10000"
-size = 1005216
-sha256 = "0aece639bc6c3408ec98d5d93154240408cd3146ca2dba0ca69c75a76fc4eb13"
-url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@b4c448520521b76102ec1f3225ae857621cc123d/firmware/v0.5.0/Wireless_power_emergency_stop_app_v0.5.0.bin"
+size = 1011040
+sha256 = "994329ea2c4b40fb051215a8a316d139f3316f56018c7185a13b14d1d9cda54d"
+url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@15f5ac30420a228db228f57e62274e746b9f46b6/firmware/v0.6.0/Wireless_power_emergency_stop_app_v0.6.0.bin"
 
 [firmware.merged]
-filename = "Wireless_power_emergency_stop_merged_v0.5.0.bin"
+filename = "Wireless_power_emergency_stop_merged_v0.6.0.bin"
 offset = "0x0"
-size = 1070752
-sha256 = "06804e6793cffc8f9fb10588f5c3637f993e64cbc007d2d48e86c081b3d03bbd"
-url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@b4c448520521b76102ec1f3225ae857621cc123d/firmware/v0.5.0/Wireless_power_emergency_stop_merged_v0.5.0.bin"
+size = 1076576
+sha256 = "725c871724ab87766d832eca02c1a2489d3c84e912a41fd747eaef8653a4529c"
+url = "https://cdn.jsdelivr.net/gh/qingmeijiupiao/Wireless_power_emergency_stop@15f5ac30420a228db228f57e62274e746b9f46b6/firmware/v0.6.0/Wireless_power_emergency_stop_merged_v0.6.0.bin"
