@@ -32,7 +32,7 @@ dependencies:
       type: git
     version: d3f1c7822c9d033e4f9374416caee392be21ae40
   battery_level:
-    component_hash: 76efe9474b7d885ac30855fd38495a3f5c18562ec459c3be7c9f0888fc467848
+    component_hash: ed2b8cbf4f42d8e1db01967a1e13bcb52c5379d9e99442c122de1bfdc57fa098
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
@@ -48,7 +48,7 @@ dependencies:
       type: git
     version: d3f1c7822c9d033e4f9374416caee392be21ae40
   blackbox_service:
-    component_hash: ee8a1927886a5b8b6d3c4de7dda2cdfe2bdb4c3c707a27f9bde724febe96f676
+    component_hash: 798818fa07f4460a1615e68486edc64c3465002b1fd63ccf1c72071557322549
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
@@ -80,7 +80,7 @@ dependencies:
       type: git
     version: d3f1c7822c9d033e4f9374416caee392be21ae40
   espnow_service_proto:
-    component_hash: 06241d1f538adbd3382f6be8d9b3a2bcded57cb66f3816fd704fe8f685e0fea8
+    component_hash: b530d696cc580b6585eb4628cd70c18bb57faf80ba0a248a9a2429e19a0832d0
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
@@ -88,7 +88,7 @@ dependencies:
       type: git
     version: d3f1c7822c9d033e4f9374416caee392be21ae40
   espnow_service_remote:
-    component_hash: bfde5c512414422f982d5ac09cfb0ba6c2d80e4ab8af0b003d4c44708890d862
+    component_hash: 0141a0edbd3abaa6b3d64dd74cdb62078faf731be745860d3ab362f97d2e4e37
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
