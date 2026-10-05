@@ -15,8 +15,10 @@ void stop_from_isr();
 void request_stop();
 // 诊断命令：请求接通输出；物理触点闭合期间会被忽略。
 void request_on(); // 诊断命令；物理触点闭合期间被忽略
-// 启动配对流程；clear_first 为真时先清除已保存节点后重新配对。
-void start_pairing(bool clear_first = false);
+// 启动配对流程；已配对时也可重新配对，成功才原子替换旧绑定、失败保留旧绑定（不会向旧目标补发 OFF）。
+void start_pairing();
+// 删除本机全部配对记录并停在未配对状态，不再向原对端发送任何报文。
+void delete_pairing();
 /** @brief 睡前静止握手；要求无待办且已确认 OFF，或本轮关断 connect_ms 已耗尽。
  * @note 超时休眠不代表关闭确认；新 STOP/重试/触点变化会作废静止结论。
  */

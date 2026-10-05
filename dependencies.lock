@@ -6,7 +6,7 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/bsp/ADC
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   Button:
     component_hash: 3a20b12e7f8f0d70203f042fcf637dba96658a50dffbcea4f9a035856565fb75
     dependencies: []
@@ -14,7 +14,7 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/middleware/Button
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   HXC_NVS:
     component_hash: ace14a26b036a8a51f191146556bb91c5aa7af50e3baf6ee087fd133f9f23f7b
     dependencies: []
@@ -22,7 +22,7 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/bsp/HXC_NVS
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   Interp:
     component_hash: 1ba36287c5d1dab068a1f39367b02de9d4c77f435c398cb28c43de8a273865bf
     dependencies: []
@@ -30,33 +30,33 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/common/Interp
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   battery_level:
-    component_hash: ed2b8cbf4f42d8e1db01967a1e13bcb52c5379d9e99442c122de1bfdc57fa098
+    component_hash: 76efe9474b7d885ac30855fd38495a3f5c18562ec459c3be7c9f0888fc467848
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/middleware/battery_level
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   blackbox:
     dependencies: []
     source:
-      path: components/overrides/blackbox
+      path: ..\wireless-power-components\components\middleware\blackbox
       type: local
     version: '*'
   blackbox_service:
-    component_hash: bee31fb8be904f28ec7b7135417d22bd2fd2e3bad84b3a50068d67af3d28b3fa
+    component_hash: ee8a1927886a5b8b6d3c4de7dda2cdfe2bdb4c3c707a27f9bde724febe96f676
     dependencies: []
     source:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/middleware/blackbox_service
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   circular_flash_buffer:
     dependencies: []
     source:
-      path: components/overrides/circular_flash_buffer
+      path: ..\wireless-power-components\components\bsp\circular_flash_buffer
       type: local
     version: '*'
   diagnostic_log:
@@ -66,29 +66,25 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/common/diagnostic_log
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   espnow_link:
     dependencies: []
     source:
-      path: components/overrides/espnow_link
+      path: ..\wireless-power-components\components\middleware\espnow_link
       type: local
     version: '*'
   espnow_service_proto:
-    component_hash: c199a0bc8f35f63a559e7b1085eede80f4b26c5e412165f80832035c07f22bbe
     dependencies: []
     source:
-      git: https://github.com/qingmeijiupiao/wireless-power-components.git
-      path: components/product/espnow_service_proto
-      type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+      path: ..\wireless-power-components\components\product\espnow_service_proto
+      type: local
+    version: '*'
   espnow_service_remote:
-    component_hash: 0141a0edbd3abaa6b3d64dd74cdb62078faf731be745860d3ab362f97d2e4e37
     dependencies: []
     source:
-      git: https://github.com/qingmeijiupiao/wireless-power-components.git
-      path: components/product/espnow_service_remote
-      type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+      path: ..\wireless-power-components\components\product\espnow_service_remote
+      type: local
+    version: '*'
   idf:
     source:
       type: idf
@@ -100,7 +96,7 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/bsp/shell
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
   wifi_manager:
     component_hash: ed4e19eea948ad69f29a6309dd35d459d84f4fe05169fab46477fc989fb950ae
     dependencies: []
@@ -108,7 +104,7 @@ dependencies:
       git: https://github.com/qingmeijiupiao/wireless-power-components.git
       path: components/bsp/wifi_manager
       type: git
-    version: b9816655d7e1db46a8e5d3c7e29e05d9edb5f9a4
+    version: 086837785611c166abf3743670741d5c6ff2d035
 direct_dependencies:
 - ADC
 - Button
@@ -125,6 +121,6 @@ direct_dependencies:
 - idf
 - shell
 - wifi_manager
-manifest_hash: 9c6588d8480034e21de2627addfcd402f9f7db087c8d179c6682f3c2fe7dc93d
+manifest_hash: 70bd32613af23ba0acd7c98dcd4d9013474ae4579cf17025f8f5d4167eec7792
 target: esp32c3
 version: 3.0.0

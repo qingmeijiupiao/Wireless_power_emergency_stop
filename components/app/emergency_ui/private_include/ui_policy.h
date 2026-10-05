@@ -17,12 +17,11 @@ inline int sleep_time_index(uint32_t value) {
             return i;
     return 0;
 }
-// 紧急画面：停止/启动过程，或尚未确认的保护/短路/检测故障。紧急画面不允许被菜单遮盖。
+// 紧急画面：尚未确认的保护/短路/检测故障。停止/启动过程允许进入菜单完成配对/删除等非输出操作。
 inline bool urgent(const EmergencyRemote::Snapshot &remote, bool fault_acknowledged) {
     using EmergencyRemote::State;
-    return remote.state == State::STOPPING || remote.state == State::STARTING ||
-           (!fault_acknowledged &&
-            (remote.protection_mask || remote.state == State::SHORT_FAULT || remote.state == State::DETECT_ERROR));
+    return !fault_acknowledged &&
+           (remote.protection_mask || remote.state == State::SHORT_FAULT || remote.state == State::DETECT_ERROR);
 }
 // 故障提示状态机：负责在新故障出现时开始保持、故障消失后转为“历史提示”，
 // 并保证一次新的 ON 尝试会取代上一次被拒绝的故障提示。
@@ -66,17 +65,17 @@ struct FaultNotice {
 };
 using Action = EmergencyUi::Action;
 // 菜单状态容器。selected 为当前条目号（0..6），info_page 为信息页下标（0..3），
-// sleep_choice 为休眠时长选项，stage 用于“修复/配对”等需要二次确认的条目，confirm 为确认页勾选状态。
+// sleep_choice 为休眠时长选项，confirm 为确认页勾选状态。
 // 具体按键行为由 MenuPage 负责，本结构只保存状态。
 struct Menu {
     View view = View::Home;
-    int selected = 0, stage = 0, info_page = 0, sleep_choice = 0;
+    int selected = 0, info_page = 0, sleep_choice = 0;
     bool confirm = false;
     int64_t touched = 0; // 最近一次按键时刻，用于空闲自动返回主页
-    // 回到主页并清空条目、阶段与确认状态。
+    // 回到主页并清空条目与确认状态。
     void home() {
         view = View::Home;
-        selected = stage = 0;
+        selected = 0;
         confirm = false;
     }
 };

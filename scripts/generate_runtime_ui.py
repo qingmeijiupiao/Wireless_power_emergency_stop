@@ -2,7 +2,7 @@
 from PIL import Image, ImageDraw
 from generate_diagnostic_pages import FONT, SMALL, ROOT, icon, centered
 from generate_live_ui import pack, array
-items = ['返回数据', '常亮模式', '手动休眠', '休眠时间', '开始配对', '重新配对', '设备信息']
+items = ['返回数据', '常亮模式', '手动休眠', '休眠时间', '开始配对', '删除配对', '设备信息']
 menus=[]; confirms=[]
 for n, title in enumerate(items):
     im=Image.new('1',(128,64)); d=ImageDraw.Draw(im)
@@ -15,7 +15,7 @@ for n, title in enumerate(items):
     d.text((20,46),'取消',font=SMALL,fill=1); d.text((82,46),'确认',font=SMALL,fill=1)
     confirms.append(im)
 messages=[]
-for title, detail in [('正在休眠','按键或急停唤醒'),('无法休眠','请先拔下电源'),('无法休眠','请先关闭输出'),('无法休眠','输出状态未确认'),('暂不可操作','等待操作完成'),('请先松开按键','随后再操作'),('设置已保存','常亮模式'),('设置失败','请重新操作'),('正在配对','请开启功率计配对'),('再次确认','将删除原配对记录'),('连接失败','短按按键重试')]:
+for title, detail in [('正在休眠','按键或急停唤醒'),('无法休眠','请先拔下电源'),('无法休眠','请先关闭输出'),('无法休眠','输出状态未确认'),('暂不可操作','等待操作完成'),('请先松开按键','随后再操作'),('设置已保存','常亮模式'),('设置失败','请重新操作'),('正在配对','请开启功率计配对'),('已删除配对','可重新配对'),('连接失败','短按按键重试')]:
     im=Image.new('1',(128,64)); d=ImageDraw.Draw(im)
     im.paste(icon('off' if title=='正在休眠' else 'protected'),(3,12))
     d.text((56,17),title,font=SMALL,fill=1); centered(d,51,detail,SMALL); messages.append(im)

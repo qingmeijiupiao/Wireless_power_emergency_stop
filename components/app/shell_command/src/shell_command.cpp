@@ -200,13 +200,13 @@ esp_err_t init() {
         }));
 
     /**
-     * @brief remote - 查询链路状态并执行急停/开启/重连/配对操作
-     * @usage remote [status|stop|on|retry|pair|repair|test-channel]
+     * @brief remote - 查询链路状态并执行急停/开启/重连/配对/删除操作
+     * @usage remote [status|stop|on|retry|pair|delete|test-channel]
      * @note 命令只提交线程安全请求，实际事务由 EmergencyRemote 工作线程完成。
      */
     shell.register_command(ShellCommand_t(
         "remote", "Emergency remote status and control",
-        "[status|stop|on|retry|pair|repair|test-channel]",
+        "[status|stop|on|retry|pair|delete|test-channel]",
         [](int argc, char** argv) {
             // 命令只提交线程安全请求，实际事务由 EmergencyRemote 工作线程完成。
             const char* action = argc > 1 ? argv[1] : "status";
@@ -241,14 +241,14 @@ esp_err_t init() {
             }
             if (!strcmp(action, "pair")) {
                 APP_LOGI("ProductEvent", "remote command source=shell action=pair result=submitted");
-                EmergencyRemote::start_pairing(false);
+                EmergencyRemote::start_pairing();
                 printf("remote pairing started\n");
                 return 0;
             }
-            if (!strcmp(action, "repair")) {
-                APP_LOGI("ProductEvent", "remote command source=shell action=repair result=submitted");
-                EmergencyRemote::start_pairing(true);
-                printf("remote pairing started (peers cleared)\n");
+            if (!strcmp(action, "delete")) {
+                APP_LOGI("ProductEvent", "remote command source=shell action=delete result=submitted");
+                EmergencyRemote::delete_pairing();
+                printf("remote pairing records deletion requested\n");
                 return 0;
             }
             if (!strcmp(action, "test-channel")) {
@@ -256,7 +256,7 @@ esp_err_t init() {
                 printf("remote channel test requested\n");
                 return 0;
             }
-            printf("Usage: remote [status|stop|on|retry|pair|repair|test-channel]\n");
+            printf("Usage: remote [status|stop|on|retry|pair|delete|test-channel]\n");
             return 1;
         }));
 

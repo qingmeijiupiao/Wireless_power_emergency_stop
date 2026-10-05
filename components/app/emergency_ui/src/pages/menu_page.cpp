@@ -84,7 +84,6 @@ Update MenuPage::handle_list(Gesture event, UiState &state) {
         // 其余条目进入确认页。
         menu.view = UiPolicy::View::Confirm;
         menu.confirm = false;
-        menu.stage = 0;
         break;
     }
     return {};
@@ -101,19 +100,13 @@ Update MenuPage::handle_confirm(Gesture event, UiState &state) {
         menu.view = UiPolicy::View::Menu;
         return {};
     }
-    if (menu.selected == 5 && menu.stage == 0) {
-        // 重新配对需要二次确认：第一次长按进入第二阶段。
-        menu.stage = 1;
-        menu.confirm = false;
-        return {};
-    }
     // 已勾选且满足确认条件：上报与条目号对应的动作并返回主页。
     Update result;
     switch (menu.selected) {
     case 1: result.action = Action::AlwaysOn; break;
     case 2: result.action = Action::Sleep; break;
     case 4: result.action = Action::Pair; break;
-    case 5: result.action = Action::Repair; break;
+    case 5: result.action = Action::DeletePairing; break;
     default: break;
     }
     menu.home();

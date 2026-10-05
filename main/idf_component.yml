@@ -10,7 +10,7 @@ dependencies:
   diagnostic_log:
     git: &wireless_power_components_repo https://github.com/qingmeijiupiao/wireless-power-components.git
     path: components/common/diagnostic_log
-    version: &wireless_power_components_version 086837785611c166abf3743670741d5c6ff2d035
+    version: &wireless_power_components_version d3f1c7822c9d033e4f9374416caee392be21ae40
   HXC_NVS:
     git: *wireless_power_components_repo
     path: components/bsp/HXC_NVS
@@ -28,13 +28,13 @@ dependencies:
     path: components/bsp/shell
     version: *wireless_power_components_version
   circular_flash_buffer:
-    override_path: ../components/overrides/circular_flash_buffer
+    override_path: ../../wireless-power-components/components/bsp/circular_flash_buffer
   Interp:
     git: *wireless_power_components_repo
     path: components/common/Interp
     version: *wireless_power_components_version
   blackbox:
-    override_path: ../components/overrides/blackbox
+    override_path: ../../wireless-power-components/components/middleware/blackbox
   battery_level:
     git: *wireless_power_components_repo
     path: components/middleware/battery_level
@@ -44,15 +44,11 @@ dependencies:
     path: components/middleware/blackbox_service
     version: *wireless_power_components_version
   espnow_link:
-    override_path: ../components/overrides/espnow_link
+    override_path: ../../wireless-power-components/components/middleware/espnow_link
   espnow_service_proto:
-    git: *wireless_power_components_repo
-    path: components/product/espnow_service_proto
-    version: *wireless_power_components_version
+    override_path: ../../wireless-power-components/components/product/espnow_service_proto
   espnow_service_remote:
-    git: *wireless_power_components_repo
-    path: components/product/espnow_service_remote
-    version: *wireless_power_components_version
+    override_path: ../../wireless-power-components/components/product/espnow_service_remote
   Button:
     git: *wireless_power_components_repo
     path: components/middleware/Button

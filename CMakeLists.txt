@@ -15,7 +15,6 @@ idf_build_set_property(MINIMAL_BUILD ON)
 set(EXTRA_COMPONENT_DIRS
     "components/app"
     "components/bsp"
-    "components/overrides"
 )
 
 # MAJOR.MINOR 由开发者手工维护。PATCH=99 标识本地构建；

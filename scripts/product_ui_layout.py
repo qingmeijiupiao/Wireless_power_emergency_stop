@@ -97,7 +97,7 @@ def failed(critical=False,usb=False):
     if critical:return state_page('stopping','关闭未确认','仍在重试','待确认')
     return state_page('offline','连接失败','短按重试','未连接')
 
-MENU=['返回主页','常亮已关','手动休眠','休眠时间','开始配对','重新配对','设备信息']
+MENU=['返回主页','常亮已关','手动休眠','休眠时间','开始配对','删除配对','设备信息']
 def menu(selected):
     im=Image.new('1',(128,64));d=ImageDraw.Draw(im)
     center(d,MENU[(selected-1)%7],4)
@@ -147,7 +147,7 @@ GROUPS={
  ('菜单：当前选中手动休眠',menu(2)),
  ('开启常亮：默认取消',confirm('开启常亮','sun')),
  ('休眠确认：选中确认',confirm('进入休眠','moon',True)),
- ('重新配对：第二次确认',confirm('删除配对','unpaired')),
+ ('删除配对：单次确认',confirm('删除配对','unpaired')),
  ('设备信息：电压与 SOC',info())],
  'power':[
  ('插电：休眠被阻止',state_page('usb','无法休眠','请拔电源')),

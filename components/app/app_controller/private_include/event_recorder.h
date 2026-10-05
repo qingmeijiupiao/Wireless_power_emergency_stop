@@ -18,6 +18,7 @@ public:
     void observe(const EmergencyRemote::Snapshot &remote);
 
 private:
+    uint32_t pairing_result_before_ = 0;
     bool online_before_ = false;     /**< 上轮原始 online，不受 connection_failed 影响。 */
     bool paired_before_ = false;     /**< 上轮已配对状态。 */
     bool pairing_before_ = false;    /**< 上轮正在配对状态。 */

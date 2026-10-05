@@ -79,20 +79,16 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
         APP_LOGI(kEventTag, "fault notice page=%d protection=%u attempt=%lu", state_.notice.page,
                        remote.protection_mask, static_cast<unsigned long>(remote.on_attempt));
     }
-    // 连接失败上升沿：回到主页并记为一次活动，避免停留在失效的菜单里。
+    // 连接失败上升沿：记一次活动并刷新提示，但不强制退出菜单，避免打断配对/删除操作。
     if (remote.connection_failed && !state_.failed_before) {
         result.activity = true;
-        state_.menu.home();
         redraw_ = true;
     }
     state_.failed_before = remote.connection_failed;
-    // 停止/启动进行中屏蔽按键并固定回主页，防止误触改变输出状态。
+    // 停止/启动进行中不再强制回主页或吞掉按键，允许进入菜单完成配对/删除等非输出操作。
     state_.controlling = remote.state == EmergencyRemote::State::STOPPING ||
                          remote.state == EmergencyRemote::State::STARTING;
-    if (state_.controlling) {
-        state_.menu.home();
-        event = Gesture::None;
-    } else if (event != Gesture::None) {
+    if (event != Gesture::None) {
         // 未确认故障时首次短按只用于确认并查看数据，不透传给菜单触发 ON 或进入隐藏页面。
         if (state_.menu.view == UiPolicy::View::Home && !state_.fault_acknowledged && state_.notice.page >= 0 &&
             (state_.current_fault >= 0 || state_.notice.holding(now_us)) &&
@@ -121,7 +117,7 @@ Update UiManager::handle_input(const EmergencyRemote::Snapshot &remote, Gesture 
         case Action::Sleep: action = "sleep"; break;
         case Action::SleepTime: action = "sleep_time"; break;
         case Action::Pair: action = "pair"; break;
-        case Action::Repair: action = "repair"; break;
+        case Action::DeletePairing: action = "delete"; break;
         default: break;
         }
         APP_LOGI(kEventTag, "menu action=%s sleep_choice=%d", action, page_update.sleep_choice);

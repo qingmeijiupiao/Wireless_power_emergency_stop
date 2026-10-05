@@ -14,7 +14,7 @@
 | `battery [status\|reset-calibration\|reset-level]` | 读取电压/电量/分压倍率或复位校准与 RTC 电量 |
 | `config` | 列出全部运行参数及有效范围 |
 | `set <name> <value>` | 保存运行参数到 NVS |
-| `remote [status\|stop\|on\|retry\|pair\|repair\|test-channel]` | 查询链路状态或提交急停/开启/重连/配对/信道测试请求 |
+| `remote [status\|stop\|on\|retry\|pair\|delete\|test-channel]` | 查询链路状态或提交急停/开启/重连/配对/删除配对/信道测试请求 |
 | `gpio` | 输出板级 GPIO 配置 |
 | `fault` | 显示最近一次保护/拒绝原因页面 |
 | `blackbox [status\|dump\|pull\|clear\|mark]` | 查询、拉取、清空黑匣子或写入标记 |

@@ -117,8 +117,8 @@ inline void render_menu(uint8_t* frame, const UiPolicy::Menu& menu, bool always_
     if (menu.view == UiPolicy::View::SleepTime) {
         std::memcpy(frame, kSleepTimeMenus[menu.sleep_choice], 1024);
     } else if (menu.view == UiPolicy::View::Confirm) {
-        // stage 为二次确认阶段时固定展示第 7 项；否则用当前条目。确认光标与常亮模式共同决定图集下标。
-        const int item = menu.stage ? 7 : menu.selected;
+        // 确认光标与常亮模式共同决定图集下标。
+        const int item = menu.selected;
         const int index = (always_on ? 16 : 0) + item * 2 + (menu.confirm ? 1 : 0);
         std::memcpy(frame, kProductConfirms[index], 1024);
     } else std::memcpy(frame, kProductMenus[(always_on ? 7 : 0) + menu.selected], 1024);

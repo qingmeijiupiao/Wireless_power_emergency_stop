@@ -33,14 +33,14 @@ messages=[state('moon','准备休眠','按键可唤醒'),state('usb','无法休�
  state('on','无法休眠','请先关闭','开启'),state('stopping','无法休眠','等待确认','待确认'),
  state('starting','暂不可操作','等待完成','待确认'),state('ready','请松开按键','随后操作'),
  state('sun','常亮已开','设置已保存'),state('protected','保存失败','重新操作'),
- state('unpaired','正在配对','对端配对','未连接'),state('unpaired','删除配对','再次确认'),
+ state('unpaired','正在配对','对端配对','未连接'),state('unpaired','已删除配对','可重新配对','未连接'),
  state('sun','常亮已关','设置已保存'),state('battery','电量偏低','请接电源',soc=8),state('moon','休眠时间','设置已保存')]
 emit('kProductMessages',messages,'[13][1024]')
 menus=[]; confirms=[]
 for mode in [False,True]:
  p['MENU'][1]='常亮已开' if mode else '常亮已关'
  menus.extend(menu(i) for i in range(7))
- for title,symbol in [('返回主页','return'),('关闭常亮' if mode else '开启常亮','sun'),('进入休眠','moon'),('休眠时间','moon'),('开始配对','unpaired'),('重新配对','unpaired'),('设备信息','info'),('删除配对','unpaired')]:
+ for title,symbol in [('返回主页','return'),('关闭常亮' if mode else '开启常亮','sun'),('进入休眠','moon'),('休眠时间','moon'),('开始配对','unpaired'),('删除配对','unpaired'),('设备信息','info'),('删除配对','unpaired')]:
   confirms.extend([confirm(title,symbol,False),confirm(title,symbol,True)])
 emit('kProductMenus',menus,'[14][1024]')
 emit('kProductConfirms',confirms,'[32][1024]')

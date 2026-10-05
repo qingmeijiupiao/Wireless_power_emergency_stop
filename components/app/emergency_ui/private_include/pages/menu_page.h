@@ -19,7 +19,7 @@ class MenuPage final : public Page {
   private:
     /** @brief 菜单列表：短按循环选择，长按按条目跳转或进入确认。 */
     Update handle_list(Gesture gesture, UiState &state);
-    /** @brief 确认页：短按切换勾选，长按确认或取消；重新配对需要二次确认。 */
+    /** @brief 确认页：短按切换勾选，长按确认或取消。 */
     Update handle_confirm(Gesture gesture, UiState &state);
     /** @brief 设备信息页：短按循环 4 个子页，长按返回主页。 */
     Update handle_info(Gesture gesture, UiState &state);

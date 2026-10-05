@@ -30,7 +30,7 @@ Snapshot model{};
 EspNowLink::MacAddress controller{};
 // 来自 ISR/任务上下文的原子请求标志：ISR 只能置位，统一由工作线程消费。
 std::atomic_bool contact_fell{false}, stop_requested{false}, on_requested{false}, pair_requested{false};
-std::atomic_bool wrong_channel_requested{false}, repair_requested{false}, pause_requested{false};
+std::atomic_bool wrong_channel_requested{false}, delete_requested{false}, pause_requested{false};
 std::atomic_bool retry_requested{false};
 // 启动时是否处于“触点释放唤醒恢复”场景，影响首次 ON 的排队条件。
 bool resume_release_on_boot = false;
@@ -213,9 +213,38 @@ void worker(void *) {
     bool recovery_pending = false;
     uint8_t protection_before = 0;
     bool output_before = false, confirmed_before = false;
+    uint32_t pair_result_serial = 0;
+    int64_t interlock_at = 0;
+    bool interlock_before = true;
     while (true) {
         const int64_t now = esp_timer_get_time();
         const bool low = Hardware::stop_closed();
+        EspNowLink::PairingResult pairing_result = {};
+        EspNowLink::get_pairing_result(&pairing_result);
+        if (pairing_result.serial != pair_result_serial) {
+            pair_result_serial = pairing_result.serial;
+            if (pairing_result.initiator) {
+                // 配对结束后重建输出证据，旧事务结果不能作用到新绑定。
+                portENTER_CRITICAL(&lock);
+                ++peer_session;
+                model.output_confirmed = false;
+                model.output_time_us = 0;
+                model.data_time_us = 0;
+                portEXIT_CRITICAL(&lock);
+                pending = false;
+                id = 0;
+                current_data_request = 0;
+                off_required = true;
+                off_since = now;
+                connection_since = now;
+                failed = false;
+                on_after_off = false;
+                release_armed = false;
+                retry_at = 0;
+                interlock_at = 0;
+                EspNowLink::cancel_transmissions();
+            }
+        }
         // 每秒汇总一次链路统计增量，仅在有异常时告警，便于诊断无线质量。
         if (now >= stats_at) {
             EspNowLink::LinkStatistics stats{};
@@ -233,6 +262,31 @@ void worker(void *) {
                          static_cast<unsigned long>(overflow));
             last_stats = stats;
             stats_at = now + 1000000;
+        }
+        // 删除配对：清空本机绑定后停在未配对状态，不再向原对端发包。
+        if (delete_requested.exchange(false)) {
+            EspNowLink::leave_pairing_mode();
+            const esp_err_t err = EspNowLink::clear_saved_peers();
+            EspNowLink::cancel_transmissions();
+            portENTER_CRITICAL(&lock);
+            controller = {};
+            ++peer_session;
+            model.output_confirmed = false;
+            model.output_time_us = 0;
+            model.data_time_us = 0;
+            portEXIT_CRITICAL(&lock);
+            pending = false;
+            id = 0;
+            on_after_off = false;
+            maybe_on = false;
+            off_required = false;
+            failed = false;
+            recovery_needed = false;
+            release_armed = false;
+            current_data_request = 0;
+            retry_at = recover_at = data_at = 0;
+            set_state(State::UNPAIRED, "pairing_deleted");
+            APP_LOGI(kEventTag, "pairing deleted peers result=%s", esp_err_to_name(err));
         }
         if (wrong_channel_requested.exchange(false)) {
             APP_LOGI(kEventTag, "channel test source=shell channel=6 result=%s", esp_err_to_name(WiFiManager::instance().set_channel(6)));
@@ -326,36 +380,10 @@ void worker(void *) {
             if (err == ESP_OK)
                 APP_LOGI(kEventTag, "radio resumed channel=%u", channel);
         }
-        // 配对请求：仅当无待办事务、未排队 ON、未在恢复信道/配对中，且当前输出安全时才受理。
+        // 配对请求：无待办事务、未在恢复信道/配对中即受理；已配对时也允许重新配对，成功才替换旧绑定。
         if (pair_requested.exchange(false)) {
-            const auto status = snapshot();
             invalidate_sleep();
-            if (!pending && !on_after_off && !EspNowLink::is_recovering_channel() && !EspNowLink::is_pairing() &&
-                (!status.paired || (!off_required && !status.output_on && status.output_time_us > 0 &&
-                                    now - status.output_time_us < RuntimeSettings::get(RuntimeSettings::Id::FreshMs) * 1000LL))) {
-                // 重新配对：先清空已保存节点及输出/数据时间戳，强制重新同步 OFF。
-                if (repair_requested.exchange(false)) {
-                    finish_operation(on_operation, "ON", "cancelled_by_pairing", now);
-                    begin_operation(off_operation, operation_serial, "OFF", "repair_sync", now);
-                    APP_LOGI(kEventTag, "pairing: clear saved peers");
-                    EspNowLink::SavedPeer old{};
-                    while (EspNowLink::get_saved_peer(0, &old) == ESP_OK) {
-                        EspNowLink::remove_peer(old.address);
-                        if (EspNowLink::remove_saved_peer(old.address) != ESP_OK)
-                            break;
-                    }
-                    portENTER_CRITICAL(&lock);
-                    ++peer_session;
-                    model.output_confirmed = false;
-                    model.output_time_us = 0;
-                    model.data_time_us = 0;
-                    portEXIT_CRITICAL(&lock);
-                    off_required = true;
-                    off_since = now;
-                    maybe_on = false;
-                    EspNowLink::cancel_transmissions();
-                    current_data_request = 0;
-                }
+            if (!pending && !on_after_off && !EspNowLink::is_recovering_channel() && !EspNowLink::is_pairing()) {
                 failed = false;
                 connection_since = now;
                 if (off_required) off_since = now;
@@ -364,7 +392,7 @@ void worker(void *) {
                 const auto err = EspNowLink::start_pairing();
                 APP_LOGI(kEventTag, "pairing start: %s", esp_err_to_name(err));
             } else
-                APP_LOGI(kEventTag, "pairing denied: unsafe output or pending transaction");
+                APP_LOGI(kEventTag, "pairing denied: pending transaction or busy");
         }
         // 最新遥测只更新显示；未知 ON 的安全证据只能由匹配的控制应答纠正。
         Telemetry incoming{};
@@ -438,7 +466,7 @@ void worker(void *) {
         }
         const auto before = snapshot();
         if (!failed && before.online) connection_since = now;
-        if (now - connection_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL && !off_required) {
+        if (!EspNowLink::is_pairing() && now - connection_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL && !off_required) {
             finish_operation(on_operation, "ON", "cancelled_by_link_loss", now);
             begin_operation(off_operation, operation_serial, "OFF", "link_lost", now);
             off_logged = false;
@@ -450,7 +478,7 @@ void worker(void *) {
             current_data_request = 0;
             retry_at = 0;
         }
-        const bool stop_expired = off_required && now - off_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL;
+        const bool stop_expired = !EspNowLink::is_pairing() && off_required && now - off_since >= RuntimeSettings::get(RuntimeSettings::Id::ConnectMs) * 1000LL;
         if (!failed && stop_expired) {
             finish_operation(on_operation, "ON", "cancelled_by_OFF_timeout", now);
             finish_operation(off_operation, "OFF", "unconfirmed_timeout", now);
@@ -528,6 +556,25 @@ void worker(void *) {
             set_state(State::UNPAIRED);
             vTaskDelay(pdMS_TO_TICKS(10));
             continue;
+        }
+
+        if (EspNowLink::is_pairing()) {
+            vTaskDelay(pdMS_TO_TICKS(10));
+            continue;
+        }
+        // 急停授权使用独立心跳；超时后功率计禁止任何来源开启。
+        const bool inhibited = low || off_required || failed || stop_requested.load() || contact_fell.load();
+        if (!EspNowLink::is_recovering_channel() && (now >= interlock_at || inhibited != interlock_before)) {
+            const uint8_t payload = inhibited ? 1 : 0;
+            EspNowLink::SendOptions options = {};
+            const auto error = EspNowLink::send(saved.address, EspNowService::Internal::MSG_REMOTE_INTERLOCK,
+                                                &payload, sizeof(payload), options);
+            if (error == ESP_OK) {
+                interlock_before = inhibited;
+                interlock_at = now + 500000;
+            } else {
+                interlock_at = now + 100000;
+            }
         }
 
         // 应答超时：清除在途事务并触发信道恢复；完成关断阶段使用更长的重试间隔。
@@ -658,6 +705,7 @@ esp_err_t init(bool resume_release) {
         return ESP_ERR_NO_MEM;
     ESP_ERROR_CHECK(WiFiManager::instance().init());
     ESP_ERROR_CHECK(EspNowService::init());
+    ESP_ERROR_CHECK(EspNowLink::configure_pairing(EspNowService::pairing_config(EspNowService::PairingRole::EMERGENCY_STOP)));
     EspNowService::set_switch_response_handler(receive_switch);
     EspNowService::set_data_received_handler(receive_data);
     ESP_ERROR_CHECK(EspNowLink::register_handler(kDetailMessage, receive_detail));
@@ -674,11 +722,10 @@ void request_stop() {
     EspNowLink::cancel_transmissions();
 }
 void request_on() { on_requested.store(true); }
-// 启动配对：clear_first 同时置位 repair 标志，由工作线程先清除旧节点。
-void start_pairing(bool clear_first) {
-    repair_requested.store(clear_first);
-    pair_requested.store(true);
-}
+// 启动配对：成功时由 Link 原子替换旧绑定，失败保留旧绑定。
+void start_pairing() { pair_requested.store(true); }
+// 删除配对：交由工作线程清空绑定并停在未配对状态。
+void delete_pairing() { delete_requested.store(true); }
 // 睡前握手：请求暂停并最多等待 100ms，直到快照报告 quiesced；超时则撤销暂停并返回失败。
 bool prepare_sleep() {
     pause_requested.store(true);
@@ -711,7 +758,7 @@ Snapshot snapshot() {
     portEXIT_CRITICAL(&lock);
     // 任何尚未被工作线程消费的原子请求都视为忙，避免 UI 误判为空闲。
     copy.busy = copy.busy || contact_fell.load() || stop_requested.load() || on_requested.load() ||
-                pair_requested.load() || retry_requested.load();
+                pair_requested.load() || delete_requested.load() || retry_requested.load();
     // 静止还必须满足触点读取未发生变化，否则说明存在竞态。
     copy.quiesced = copy.quiesced && !copy.busy && copy.stop_closed == (Hardware::stop_closed());
     copy.online =

@@ -11,6 +11,14 @@
 
 namespace AppController {
 void EventRecorder::observe(const EmergencyRemote::Snapshot &remote) {
+    EspNowLink::PairingResult result = {};
+    EspNowLink::get_pairing_result(&result);
+    if (result.serial != pairing_result_before_) {
+        pairing_result_before_ = result.serial;
+        APP_LOGI(kEventTag, "pair result=%s peer=%02x:%02x:%02x:%02x:%02x:%02x ch=%u legacy=%u",
+                 esp_err_to_name(result.error), result.peer.bytes[0], result.peer.bytes[1], result.peer.bytes[2],
+                 result.peer.bytes[3], result.peer.bytes[4], result.peer.bytes[5], result.channel, result.legacy);
+    }
     if (remote.online != online_before_)
         APP_LOGI(kEventTag, "meter %s", remote.online ? "online" : "offline");
     if (remote.paired != paired_before_ || remote.pairing != pairing_before_)

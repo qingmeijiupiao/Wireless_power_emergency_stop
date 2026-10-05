@@ -24,7 +24,7 @@
 namespace {
 constexpr char kTag[] = "app_main";
 // 仅放行操作事件标签；不能放行 EspNowPairing 整个标签，否则周期恢复 INFO 也会入库。
-constexpr const char *kInfoTags[] = {AppController::kEventTag, "PairingEvent"};
+constexpr const char *kInfoTags[] = {AppController::kEventTag};
 
 /** @brief 急停下降沿 ISR：只锁存关闭请求，实际事务由遥控工作线程处理。 */
 void IRAM_ATTR on_stop_fall(void *) {

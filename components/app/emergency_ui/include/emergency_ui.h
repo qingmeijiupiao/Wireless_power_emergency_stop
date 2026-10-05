@@ -8,7 +8,7 @@
 #include "esp_err.h"
 namespace EmergencyUi {
 /** 菜单或提示确认后需要业务层执行的动作。 */
-enum class Action { None, AlwaysOn, Sleep, SleepTime, Pair, Repair };
+enum class Action { None, AlwaysOn, Sleep, SleepTime, Pair, DeletePairing };
 /** 一次输入处理的结果，由主循环据此驱动业务动作与静置计时。 */
 struct Update {
     Action action = Action::None; /**< 需要执行的动作 */
