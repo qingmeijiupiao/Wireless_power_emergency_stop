@@ -332,17 +332,49 @@ ESP Launchpad 需要使用支持 Web Serial 的 Chromium 系浏览器。
 
 不要把 APP 固件写入 `0x0`，也不要把 merged 固件写入 `0x10000`。
 
+## 获取 CI 临时固件
+
+无需搭建本地开发环境或创建版本标签，推送代码并等待 CI 成功即可下载临时固件。
+
+1. 登录 GitHub，打开本仓库的 [CI Actions](https://github.com/qingmeijiupiao/Wireless_power_emergency_stop/actions/workflows/CI.yml)。
+   如果在自己的 fork 中开发，先启用该仓库的 Actions，并从自己的仓库进入。
+2. 按分支和提交选择对应的成功运行；也可用 **Run workflow** 手动选择源码分支构建。
+3. 在运行的 **Summary → Artifacts** 中下载固件 ZIP；Summary 中也会显示固件下载链接。
+4. 解压后查看 `build-info.json` 和 `README.txt`，确认产品、芯片、源码 SHA 和烧录方式。
+
+固件包名称为 `Wireless_power_emergency_stop-firmware-<短SHA>-<run_id>-<attempt>`，保留 **14 天**，到期自动清理。
+下载需要登录 GitHub 并具有仓库读取权限；运行失败或被取消时，可能没有可下载的固件。
+
+| 文件 | 用途 |
+|------|------|
+| `Wireless_power_emergency_stop_app_<短SHA>.bin` | 仅应用程序，使用兼容的 Bootloader 和分区表 |
+| `Wireless_power_emergency_stop_merged_<短SHA>.bin` | 完整固件，写入 `0x0`，用于首次安装或恢复 |
+| `SHA256SUMS` | 两个 BIN 的 SHA256 校验和 |
+| `build-info.json` | 版本、源码 SHA、分支/引用、时间、芯片、IDF 版本和运行链接 |
+| `README.txt` | 本次固件的烧录说明 |
+
+本产品不支持 OTA。APP 固件通过 USB/串口写入 `0x10000`，保留 NVS 中的配对、校准和配置。
+APP 固件仅适用于 Bootloader 和分区表兼容的更新。merged 会覆盖 NVS，配对、校准和配置需要重新设置。
+可在解压目录运行 `sha256sum -c SHA256SUMS` 校验 BIN；Windows PowerShell 可用
+`Get-FileHash .\*.bin -Algorithm SHA256` 与 `SHA256SUMS` 对照。
+
+CI 覆盖除 `firmware-dist` 外的分支推送、目标为 `main` 的 PR，以及手动运行。一次 push 含多个
+commit 时只构建最后一个提交；PR 默认构建 GitHub 生成的合并提交，`source_sha` 记录实际构建
+提交，`pull_request_head_sha` 记录 PR 来源提交。分支推送和 PR 可能分别产生一次运行。
+
+临时固件使用 `PATCH=99`，同一主次版本的不同构建通过 SHA 区分。正式版本仍通过版本标签
+发布到 Releases；在线烧录入口仍指向正式版本。
+
 ## 版本与发布
 
 版本格式为 `MAJOR.MINOR.PATCH`：
 
 - 开发者维护顶层 `CMakeLists.txt` 中的 `MAJOR` 和 `MINOR`；
-- 本地构建使用 `PATCH=99`，表示非正式固件；
+- 本地及 CI 临时构建使用 `PATCH=99`，表示非正式固件；
 - 标签发布由 CI 使用 `PATCH=0` 构建，例如 `v0.2.0`；
 - 编译时间统一按 UTC+8 写入固件。
 
-推送 `main`、提交 PR 或手动运行会触发 CI，编译固件、验证合并固件布局并上传 Actions
-artifacts。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged、
+源码分支推送、目标为 `main` 的 PR 或手动运行会触发 CI，编译、校验并上传上述临时固件。推送 `vMAJOR.MINOR` 或 `vMAJOR.MINOR.0` 标签触发发布构建，生成 APP、merged、
 SHA256SUMS 和 Launchpad 配置，发布到本仓库的 GitHub Release 并更新 `firmware-dist` 分支。
 
 ## 组件文档
