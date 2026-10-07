@@ -190,6 +190,9 @@ void worker(void *) {
     bool was_low = Hardware::stop_closed();
     // release_armed：触点曾闭合，需等待稳定释放后才允许 ON；on_after_off：已排队一次 ON。
     bool release_armed = was_low || resume_release_on_boot, on_after_off = false;
+    // 释放唤醒的 OFF 是恢复开启前的内部同步；界面展示用户的开启意图。
+    // 新 STOP/重试/配对会结束此启动上下文，不能掩盖随后真正的关断。
+    bool release_resume = resume_release_on_boot && !was_low;
     bool off_required = true; // 重启/配对后始终先同步 OFF，启动时绝不自动开输出。
     bool pending = false, recovery_needed = false;
     uint32_t id = 0;
@@ -209,6 +212,8 @@ void worker(void *) {
     uint32_t operation_serial = 0;
     OperationLog off_operation, on_operation;
     begin_operation(off_operation, operation_serial, "OFF", "boot_sync", connection_since);
+    if (release_resume)
+        set_state(State::STARTING, "release_wake");
     AppDiagnostics::ErrorLog radio_log, submit_log, data_log, recovery_log, recovery_submit_log;
     bool recovery_pending = false;
     uint8_t protection_before = 0;
@@ -240,6 +245,7 @@ void worker(void *) {
                 failed = false;
                 on_after_off = false;
                 release_armed = false;
+                release_resume = false;
                 retry_at = 0;
                 interlock_at = 0;
                 EspNowLink::cancel_transmissions();
@@ -283,6 +289,7 @@ void worker(void *) {
             failed = false;
             recovery_needed = false;
             release_armed = false;
+            release_resume = false;
             current_data_request = 0;
             retry_at = recover_at = data_at = 0;
             set_state(State::UNPAIRED, "pairing_deleted");
@@ -295,6 +302,7 @@ void worker(void *) {
         const bool fall = contact_fell.exchange(false);
         const bool stop = stop_requested.exchange(false);
         if (retry_requested.exchange(false)) {
+            release_resume = false;
             finish_operation(on_operation, "ON", "cancelled_by_retry", now);
             begin_operation(off_operation, operation_serial, "OFF", "user_retry", now);
             invalidate_sleep();
@@ -316,6 +324,7 @@ void worker(void *) {
         // 急停锁存：无论是 ISR 边沿、任务请求还是轮询首次发现的闭合，都强制进入 OFF
         // 事务并作废睡眠，同时清除尚未发送的 ON。
         if (stop || fall || (low && !was_low)) {
+            release_resume = false;
             finish_operation(on_operation, "ON", "cancelled_by_stop", now);
             begin_operation(off_operation, operation_serial, "OFF", stop ? "software_stop" : "stop_contact", now);
             invalidate_sleep();
@@ -454,7 +463,8 @@ void worker(void *) {
                 if (action == EspNowService::SwitchAction::OFF) {
                     off_required = !success;
                     retry_at = success ? 0 : now + 100000;
-                    set_state(success ? State::OFF : State::OFFLINE, success ? "OFF_ack" : "OFF_refused");
+                    set_state(success ? (release_resume ? State::STARTING : State::OFF) : State::OFFLINE,
+                              success ? "OFF_ack" : "OFF_refused");
                 } else if (!off_required) {
                     if (rsp.reason != 10 || success || first_response) {
                         const State result_state = success ? State::ON : refusal_state(rsp);
@@ -652,6 +662,7 @@ void worker(void *) {
                 }
                 portENTER_CRITICAL(&lock);
                 if (action == EspNowService::SwitchAction::ON) {
+                    release_resume = false;
                     // ON 已入发送队列，可能执行但尚未确认；保守锁存可能开启。
                     on_after_off = false;
                     maybe_on = true;
@@ -661,7 +672,7 @@ void worker(void *) {
                     ++model.on_attempt;
                 }
                 portEXIT_CRITICAL(&lock);
-                set_state(off_required ? State::STOPPING : State::STARTING, "switch_submitted");
+                set_state(off_required && !release_resume ? State::STOPPING : State::STARTING, "switch_submitted");
                 pending = true;
                 deadline = now + RuntimeSettings::get(off_required ? RuntimeSettings::Id::OffAckMs : RuntimeSettings::Id::OnAckMs) * 1000LL;
             } else {
@@ -709,7 +720,15 @@ esp_err_t init(bool resume_release) {
     EspNowService::set_switch_response_handler(receive_switch);
     EspNowService::set_data_received_handler(receive_data);
     ESP_ERROR_CHECK(EspNowLink::register_handler(kDetailMessage, receive_detail));
-    ESP_ERROR_CHECK(WiFiManager::instance().start_sta_radio(1));
+    // Link 初始化已恢复 NVS 配对；首次业务报文必须直接使用保存信道。
+    // 固定从信道 1 开始会使其他信道上的节点先超时，再额外等待恢复与 OFF 重试。
+    EspNowLink::SavedPeer saved{};
+    const bool saved_channel = EspNowLink::get_saved_peer(0, &saved) == ESP_OK &&
+                               saved.last_channel >= 1 && saved.last_channel <= 14;
+    const uint8_t channel = saved_channel ? saved.last_channel : 1;
+    ESP_ERROR_CHECK(WiFiManager::instance().start_sta_radio(channel));
+    APP_LOGI(kEventTag, "startup radio channel=%u source=%s release_wake=%u",
+             channel, saved_channel ? "saved_peer" : "default", resume_release);
     return xTaskCreate(worker, "emergency_remote", 5120, nullptr, 5, nullptr) == pdPASS ? ESP_OK : ESP_ERR_NO_MEM;
 }
 // ISR 锁存接口：仅置位标志，实际处理留给工作线程（relaxed 足够，消费者用 exchange 读取）。
